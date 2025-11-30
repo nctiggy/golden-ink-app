@@ -601,50 +601,62 @@
                 return;
             }
 
-            // Calculate how to position the image so subject is on the specified side
+            // Calculate how to position and zoom the image so subject fills ~25% on one side
             const subject = detectedSubject;
             const subjectCenterX = subject.x + subject.width / 2;
-            const subjectCenterY = subject.y + subject.height / 2;
+            // Focus on upper body - use top 40% of subject bounding box for vertical center
+            const subjectFocusY = subject.y + subject.height * 0.4;
 
-            // Scale to fit height (cover approach)
-            const scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+            // Calculate scale to make subject fill roughly 25% of canvas width
+            // We want the subject width to be about 25% of canvas
+            const targetSubjectWidth = canvasWidth * 0.35;  // Subject takes ~35% width for good framing
+            const subjectScale = targetSubjectWidth / subject.width;
+
+            // Use the larger of: subject-based scale or cover scale (fill canvas)
+            const coverScale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+            const scale = Math.max(subjectScale, coverScale * 1.2);  // At least 20% zoom beyond cover
+
             const scaledWidth = img.width * scale;
             const scaledHeight = img.height * scale;
 
-            // Position subject on the desired side
-            let offsetX;
-            const targetX = subjectPosition === 'left' ? canvasWidth * 0.25 : canvasWidth * 0.75;
+            // Position subject center at 12.5% (left) or 87.5% (right) of canvas
+            // This puts the subject in the outer 25% of the canvas
+            const targetX = subjectPosition === 'left' ? canvasWidth * 0.125 : canvasWidth * 0.875;
             const scaledSubjectX = subjectCenterX * scale;
-            offsetX = targetX - scaledSubjectX;
+            let offsetX = targetX - scaledSubjectX;
 
-            // Clamp offset so we don't show empty space
+            // Clamp offset so we don't show empty space on edges
             offsetX = Math.min(0, offsetX);
             offsetX = Math.max(canvasWidth - scaledWidth, offsetX);
 
-            // Center vertically
-            const scaledSubjectY = subjectCenterY * scale;
-            let offsetY = (canvasHeight / 2) - scaledSubjectY;
+            // Position vertically - focus on upper body, allow lower body to crop
+            const scaledSubjectFocusY = subjectFocusY * scale;
+            // Put the focus point at 40% from top of canvas (good for head/torso framing)
+            let offsetY = (canvasHeight * 0.4) - scaledSubjectFocusY;
+            // Allow cropping at bottom, but don't show empty space at top
             offsetY = Math.min(0, offsetY);
-            offsetY = Math.max(canvasHeight - scaledHeight, offsetY);
+            // Don't crop too much from top - ensure we see the head
+            const minOffsetY = canvasHeight - scaledHeight;
+            offsetY = Math.max(minOffsetY, offsetY);
 
             bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
 
-            // Calculate and show signing area (opposite side of subject)
+            // Calculate and show signing area (opposite 75% of canvas)
             const signingPadding = 20;
             if (subjectPosition === 'left') {
-                // Subject on left, signing area on right
+                // Subject on left 25%, signing area on right 75%
                 signingAreaBounds = {
-                    x: canvasWidth * 0.5 + signingPadding,
+                    x: canvasWidth * 0.25 + signingPadding,
                     y: signingPadding,
-                    width: canvasWidth * 0.5 - signingPadding * 2,
+                    width: canvasWidth * 0.75 - signingPadding * 2,
                     height: canvasHeight - signingPadding * 2
                 };
             } else {
-                // Subject on right, signing area on left
+                // Subject on right 25%, signing area on left 75%
                 signingAreaBounds = {
                     x: signingPadding,
                     y: signingPadding,
-                    width: canvasWidth * 0.5 - signingPadding * 2,
+                    width: canvasWidth * 0.75 - signingPadding * 2,
                     height: canvasHeight - signingPadding * 2
                 };
             }
