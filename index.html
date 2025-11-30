@@ -671,13 +671,25 @@
                 offsetX = Math.max(canvasWidth - scaledWidth, offsetX);
             }
 
-            // Position vertically - focus on face/upper torso
-            const scaledSubjectFocusY = subjectFocusY * scale;
-            // Put focus point at 35% from top (good for face framing)
-            let offsetY = (canvasHeight * 0.35) - scaledSubjectFocusY;
-            // Clamp to not show empty space
+            // Position vertically - PRIORITY: preserve head, crop from bottom
+            const scaledSubjectTop = subject.y * scale;  // Top of subject's head
+            const headPadding = canvasHeight * 0.05;  // 5% padding above head
+
+            // Position head near top with padding - this allows legs to be cropped
+            let offsetY = headPadding - scaledSubjectTop;
+
+            // Don't show empty space at top of canvas
             offsetY = Math.min(0, offsetY);
-            offsetY = Math.max(canvasHeight - scaledHeight, offsetY);
+
+            // Only apply bottom constraint if it wouldn't crop the head
+            const bottomConstraint = canvasHeight - scaledHeight;
+            // If bottom constraint would push head off screen, ignore it (crop bottom instead)
+            const headPositionWithBottomConstraint = scaledSubjectTop + bottomConstraint;
+            if (headPositionWithBottomConstraint >= headPadding) {
+                // Safe to apply bottom constraint - head will still be visible
+                offsetY = Math.max(bottomConstraint, offsetY);
+            }
+            // Otherwise, let bottom be cropped/empty to preserve the head
 
             bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
 
