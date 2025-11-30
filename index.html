@@ -369,6 +369,7 @@
         let backgroundImage = null;
         let detectedSubject = null;
         let subjectPosition = 'left';  // 'left' or 'right'
+        let autoPositionSubject = true;  // Auto-detect optimal side
         let cocoModel = null;
         let signingAreaBounds = null;
 
@@ -601,50 +602,88 @@
                 return;
             }
 
-            // Calculate how to position and zoom the image so subject fills ~25% on one side
             const subject = detectedSubject;
             const subjectCenterX = subject.x + subject.width / 2;
-            // Focus on upper body - use top 40% of subject bounding box for vertical center
-            const subjectFocusY = subject.y + subject.height * 0.4;
+            const subjectCenterY = subject.y + subject.height / 2;
 
-            // Calculate scale to make subject fill roughly 25% of canvas width
-            // We want the subject width to be about 25% of canvas
-            const targetSubjectWidth = canvasWidth * 0.35;  // Subject takes ~35% width for good framing
-            const subjectScale = targetSubjectWidth / subject.width;
+            // Auto-detect optimal side: if subject is right of center, put them on right
+            // This crops out the "dead space" on the opposite side
+            if (autoPositionSubject) {
+                const imgCenterX = img.width / 2;
+                subjectPosition = subjectCenterX > imgCenterX ? 'right' : 'left';
+                updatePositionButtons();
+            }
 
-            // Use the larger of: subject-based scale or cover scale (fill canvas)
+            // Focus on upper body - use top 35% of subject bounding box
+            const subjectFocusY = subject.y + subject.height * 0.35;
+
+            // Calculate scale: zoom in so subject's upper body fills the frame nicely
+            // Target: subject width should be about 40-50% of their side (which is 25% of canvas)
+            // So subject width = ~10-12% of total canvas, but we want them prominent
+            const targetSubjectWidth = canvasWidth * 0.30;  // Subject takes 30% of canvas width
+            const scaleByWidth = targetSubjectWidth / subject.width;
+
+            // Also consider height - make sure upper body fills vertically
+            const targetSubjectHeight = canvasHeight * 0.8;  // Upper body should be ~80% of height
+            const scaleByHeight = targetSubjectHeight / (subject.height * 0.6);  // Upper 60% of body
+
+            // Use the larger scale to zoom in more
+            const subjectScale = Math.max(scaleByWidth, scaleByHeight);
+
+            // Minimum scale: at least fill the canvas
             const coverScale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
-            const scale = Math.max(subjectScale, coverScale * 1.2);  // At least 20% zoom beyond cover
+            const scale = Math.max(subjectScale, coverScale);
 
             const scaledWidth = img.width * scale;
             const scaledHeight = img.height * scale;
+            const scaledSubjectCenterX = subjectCenterX * scale;
+            const scaledSubjectWidth = subject.width * scale;
 
-            // Position subject center at 12.5% (left) or 87.5% (right) of canvas
-            // This puts the subject in the outer 25% of the canvas
-            const targetX = subjectPosition === 'left' ? canvasWidth * 0.125 : canvasWidth * 0.875;
-            const scaledSubjectX = subjectCenterX * scale;
-            let offsetX = targetX - scaledSubjectX;
+            // Position subject at edge of their 25% zone
+            // For right side: subject center at 87.5% of canvas (middle of right 25%)
+            // For left side: subject center at 12.5% of canvas (middle of left 25%)
+            let targetX;
+            if (subjectPosition === 'right') {
+                // Put subject on right - their center should be at ~85% of canvas
+                targetX = canvasWidth * 0.85;
+            } else {
+                // Put subject on left - their center should be at ~15% of canvas
+                targetX = canvasWidth * 0.15;
+            }
 
-            // Clamp offset so we don't show empty space on edges
-            offsetX = Math.min(0, offsetX);
-            offsetX = Math.max(canvasWidth - scaledWidth, offsetX);
+            let offsetX = targetX - scaledSubjectCenterX;
 
-            // Position vertically - focus on upper body, allow lower body to crop
+            // For right positioning: we want to crop the LEFT side of the image
+            // So offsetX should be negative (shift image left)
+            // For left positioning: we want to crop the RIGHT side
+            // So offsetX should be positive or zero
+
+            // Only clamp to prevent showing empty canvas on the subject's side
+            if (subjectPosition === 'right') {
+                // Don't show empty space on right edge
+                offsetX = Math.max(canvasWidth - scaledWidth, offsetX);
+                // Allow cropping on left (negative offset OK, but not too much)
+                offsetX = Math.min(0, offsetX);
+            } else {
+                // Don't show empty space on left edge
+                offsetX = Math.min(0, offsetX);
+                // Allow cropping on right
+                offsetX = Math.max(canvasWidth - scaledWidth, offsetX);
+            }
+
+            // Position vertically - focus on face/upper torso
             const scaledSubjectFocusY = subjectFocusY * scale;
-            // Put the focus point at 40% from top of canvas (good for head/torso framing)
-            let offsetY = (canvasHeight * 0.4) - scaledSubjectFocusY;
-            // Allow cropping at bottom, but don't show empty space at top
+            // Put focus point at 35% from top (good for face framing)
+            let offsetY = (canvasHeight * 0.35) - scaledSubjectFocusY;
+            // Clamp to not show empty space
             offsetY = Math.min(0, offsetY);
-            // Don't crop too much from top - ensure we see the head
-            const minOffsetY = canvasHeight - scaledHeight;
-            offsetY = Math.max(minOffsetY, offsetY);
+            offsetY = Math.max(canvasHeight - scaledHeight, offsetY);
 
             bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
 
             // Calculate and show signing area (opposite 75% of canvas)
             const signingPadding = 20;
             if (subjectPosition === 'left') {
-                // Subject on left 25%, signing area on right 75%
                 signingAreaBounds = {
                     x: canvasWidth * 0.25 + signingPadding,
                     y: signingPadding,
@@ -652,7 +691,6 @@
                     height: canvasHeight - signingPadding * 2
                 };
             } else {
-                // Subject on right 25%, signing area on left 75%
                 signingAreaBounds = {
                     x: signingPadding,
                     y: signingPadding,
@@ -662,6 +700,20 @@
             }
 
             showSigningArea(signingAreaBounds);
+        }
+
+        function updatePositionButtons() {
+            if (subjectPosition === 'left') {
+                document.getElementById('subjectLeftBtn').style.background = '#d4a44a';
+                document.getElementById('subjectLeftBtn').style.color = '#1a1a2e';
+                document.getElementById('subjectRightBtn').style.background = '#444';
+                document.getElementById('subjectRightBtn').style.color = '#fff';
+            } else {
+                document.getElementById('subjectRightBtn').style.background = '#d4a44a';
+                document.getElementById('subjectRightBtn').style.color = '#1a1a2e';
+                document.getElementById('subjectLeftBtn').style.background = '#444';
+                document.getElementById('subjectLeftBtn').style.color = '#fff';
+            }
         }
 
         function showSigningArea(bounds) {
@@ -718,22 +770,18 @@
         });
 
         document.getElementById('subjectLeftBtn').addEventListener('click', () => {
+            autoPositionSubject = false;  // Manual override
             subjectPosition = 'left';
-            document.getElementById('subjectLeftBtn').style.background = '#d4a44a';
-            document.getElementById('subjectLeftBtn').style.color = '#1a1a2e';
-            document.getElementById('subjectRightBtn').style.background = '#444';
-            document.getElementById('subjectRightBtn').style.color = '#fff';
+            updatePositionButtons();
             if (backgroundImage) {
                 drawBackgroundWithSubject();
             }
         });
 
         document.getElementById('subjectRightBtn').addEventListener('click', () => {
+            autoPositionSubject = false;  // Manual override
             subjectPosition = 'right';
-            document.getElementById('subjectRightBtn').style.background = '#d4a44a';
-            document.getElementById('subjectRightBtn').style.color = '#1a1a2e';
-            document.getElementById('subjectLeftBtn').style.background = '#444';
-            document.getElementById('subjectLeftBtn').style.color = '#fff';
+            updatePositionButtons();
             if (backgroundImage) {
                 drawBackgroundWithSubject();
             }
@@ -742,15 +790,12 @@
         document.getElementById('clearBgBtn').addEventListener('click', () => {
             backgroundImage = null;
             detectedSubject = null;
+            autoPositionSubject = true;  // Reset to auto
             hideSigningArea();
             drawBackground();
             document.getElementById('modelStatus').textContent = 'AI Ready';
             document.getElementById('modelStatus').className = 'model-status ready';
         });
-
-        // Set initial button state
-        document.getElementById('subjectLeftBtn').style.background = '#d4a44a';
-        document.getElementById('subjectLeftBtn').style.color = '#1a1a2e';
 
         // =====================================================================
         // DRAWING STATE
