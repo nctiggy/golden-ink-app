@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Golden Ink</title>
+    <!-- TensorFlow.js and COCO-SSD for subject detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -102,6 +105,11 @@
             color: #fff;
         }
 
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .pattern-designer {
             margin-top: 20px;
             max-width: calc(100vw - 20px);
@@ -153,6 +161,78 @@
             margin-top: 6px;
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
+
+        /* Background image controls */
+        .bg-controls {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .model-status {
+            font-size: 11px;
+            color: #888;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        .model-status.ready {
+            color: #6f6;
+        }
+
+        .model-status.loading {
+            color: #fa0;
+        }
+
+        .signing-area-indicator {
+            position: absolute;
+            border: 2px dashed rgba(212, 164, 74, 0.5);
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 5;
+            display: none;
+        }
+
+        .signing-area-indicator.visible {
+            display: block;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { border-color: rgba(212, 164, 74, 0.3); }
+            50% { border-color: rgba(212, 164, 74, 0.7); }
+        }
+
+        .signing-label {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(26, 26, 46, 0.8);
+            color: #d4a44a;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
     </style>
 </head>
 <body>
@@ -167,10 +247,25 @@
         <canvas id="doubleCanvas"></canvas>
         <canvas id="drawCanvas"></canvas>
         <canvas id="effectCanvas"></canvas>
+        <div class="signing-area-indicator" id="signingArea">
+            <span class="signing-label">Sign here</span>
+        </div>
+    </div>
+
+    <!-- Background Image Controls -->
+    <div class="bg-controls">
+        <div class="file-input-wrapper">
+            <button id="uploadBgBtn">Upload Background</button>
+            <input type="file" id="bgImageInput" accept="image/*">
+        </div>
+        <button id="subjectLeftBtn" class="secondary" style="padding: 8px 16px;">Subject Left</button>
+        <button id="subjectRightBtn" class="secondary" style="padding: 8px 16px;">Subject Right</button>
+        <button id="clearBgBtn" class="secondary" style="padding: 8px 16px;">Clear BG</button>
+        <span class="model-status" id="modelStatus">Loading AI model...</span>
     </div>
 
     <div class="controls">
-        <button id="clearBtn">Clear</button>
+        <button id="clearBtn">Clear Drawing</button>
         <button id="undoBtn" class="secondary">Undo</button>
         <button id="fillBtn" class="secondary">Fill Canvas</button>
         <button id="playPauseBtn" class="secondary">Pause</button>
@@ -270,6 +365,13 @@
 
         let canvasWidth, canvasHeight;
 
+        // Background image state
+        let backgroundImage = null;
+        let detectedSubject = null;
+        let subjectPosition = 'left';  // 'left' or 'right'
+        let cocoModel = null;
+        let signingAreaBounds = null;
+
         function setupCanvas() {
             const dpr = window.devicePixelRatio || 1;
 
@@ -314,12 +416,329 @@
             glowCtx.lineJoin = 'round';
 
             // Draw background
-            bgCtx.fillStyle = '#3a3a4e';
-            bgCtx.fillRect(0, 0, width, height);
+            drawBackground();
+        }
+
+        function drawBackground() {
+            if (backgroundImage) {
+                drawBackgroundWithSubject();
+            } else {
+                bgCtx.fillStyle = '#3a3a4e';
+                bgCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+                hideSigningArea();
+            }
         }
 
         setupCanvas();
-        window.addEventListener('resize', setupCanvas);
+        window.addEventListener('resize', () => {
+            setupCanvas();
+            if (backgroundImage) {
+                drawBackgroundWithSubject();
+            }
+        });
+
+        // =====================================================================
+        // SUBJECT DETECTION (TensorFlow.js COCO-SSD)
+        // =====================================================================
+        async function loadModel() {
+            const statusEl = document.getElementById('modelStatus');
+            statusEl.textContent = 'Loading AI model...';
+            statusEl.className = 'model-status loading';
+
+            try {
+                cocoModel = await cocoSsd.load();
+                statusEl.textContent = 'AI Ready';
+                statusEl.className = 'model-status ready';
+                console.log('COCO-SSD model loaded');
+            } catch (err) {
+                console.error('Failed to load model:', err);
+                statusEl.textContent = 'AI unavailable';
+                statusEl.className = 'model-status';
+            }
+        }
+
+        async function detectSubject(img) {
+            if (!cocoModel) {
+                console.log('Model not loaded, using center detection');
+                return detectSubjectFallback(img);
+            }
+
+            try {
+                const predictions = await cocoModel.detect(img);
+                console.log('Detected objects:', predictions);
+
+                // Filter for significant detections (people, animals, main objects)
+                const priorityClasses = ['person', 'dog', 'cat', 'horse', 'bird', 'car', 'motorcycle', 'bicycle'];
+                const significantPredictions = predictions.filter(p =>
+                    p.score > 0.5 && (priorityClasses.includes(p.class) || p.score > 0.7)
+                );
+
+                if (significantPredictions.length === 0) {
+                    console.log('No significant subjects detected, using fallback');
+                    return detectSubjectFallback(img);
+                }
+
+                // Find the largest/most prominent subject
+                let bestSubject = significantPredictions[0];
+                let bestArea = bestSubject.bbox[2] * bestSubject.bbox[3];
+
+                for (const pred of significantPredictions) {
+                    const area = pred.bbox[2] * pred.bbox[3];
+                    // Prioritize people
+                    if (pred.class === 'person' && bestSubject.class !== 'person') {
+                        bestSubject = pred;
+                        bestArea = area;
+                    } else if (area > bestArea && (pred.class === bestSubject.class || bestSubject.class !== 'person')) {
+                        bestSubject = pred;
+                        bestArea = area;
+                    }
+                }
+
+                return {
+                    x: bestSubject.bbox[0],
+                    y: bestSubject.bbox[1],
+                    width: bestSubject.bbox[2],
+                    height: bestSubject.bbox[3],
+                    class: bestSubject.class,
+                    score: bestSubject.score
+                };
+            } catch (err) {
+                console.error('Detection failed:', err);
+                return detectSubjectFallback(img);
+            }
+        }
+
+        function detectSubjectFallback(img) {
+            // Simple fallback: assume subject is in the center-ish area
+            // This uses edge detection heuristics
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = img.width;
+            tempCanvas.height = img.height;
+            tempCtx.drawImage(img, 0, 0);
+
+            // Analyze image to find the "busy" region (likely the subject)
+            const imageData = tempCtx.getImageData(0, 0, img.width, img.height);
+            const data = imageData.data;
+
+            // Calculate variance in different regions
+            const gridSize = 4;
+            const cellWidth = img.width / gridSize;
+            const cellHeight = img.height / gridSize;
+            let maxVariance = 0;
+            let maxVarianceX = img.width / 2;
+            let maxVarianceY = img.height / 2;
+
+            for (let gy = 0; gy < gridSize; gy++) {
+                for (let gx = 0; gx < gridSize; gx++) {
+                    let sum = 0, sumSq = 0, count = 0;
+
+                    for (let y = Math.floor(gy * cellHeight); y < Math.floor((gy + 1) * cellHeight); y += 4) {
+                        for (let x = Math.floor(gx * cellWidth); x < Math.floor((gx + 1) * cellWidth); x += 4) {
+                            const idx = (y * img.width + x) * 4;
+                            const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+                            sum += brightness;
+                            sumSq += brightness * brightness;
+                            count++;
+                        }
+                    }
+
+                    const mean = sum / count;
+                    const variance = (sumSq / count) - (mean * mean);
+
+                    if (variance > maxVariance) {
+                        maxVariance = variance;
+                        maxVarianceX = (gx + 0.5) * cellWidth;
+                        maxVarianceY = (gy + 0.5) * cellHeight;
+                    }
+                }
+            }
+
+            // Estimate subject bounds around the high-variance area
+            const subjectWidth = img.width * 0.5;
+            const subjectHeight = img.height * 0.8;
+
+            return {
+                x: Math.max(0, maxVarianceX - subjectWidth / 2),
+                y: Math.max(0, maxVarianceY - subjectHeight / 2),
+                width: subjectWidth,
+                height: subjectHeight,
+                class: 'unknown',
+                score: 0.5
+            };
+        }
+
+        // =====================================================================
+        // BACKGROUND IMAGE HANDLING
+        // =====================================================================
+        function drawBackgroundWithSubject() {
+            if (!backgroundImage) return;
+
+            const img = backgroundImage;
+            const imgAspect = img.width / img.height;
+            const canvasAspect = canvasWidth / canvasHeight;
+
+            // Clear background
+            bgCtx.fillStyle = '#3a3a4e';
+            bgCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+            if (!detectedSubject) {
+                // No subject detected, just fit the image
+                let drawWidth, drawHeight, drawX, drawY;
+                if (imgAspect > canvasAspect) {
+                    drawHeight = canvasHeight;
+                    drawWidth = drawHeight * imgAspect;
+                    drawX = (canvasWidth - drawWidth) / 2;
+                    drawY = 0;
+                } else {
+                    drawWidth = canvasWidth;
+                    drawHeight = drawWidth / imgAspect;
+                    drawX = 0;
+                    drawY = (canvasHeight - drawHeight) / 2;
+                }
+                bgCtx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+                hideSigningArea();
+                return;
+            }
+
+            // Calculate how to position the image so subject is on the specified side
+            const subject = detectedSubject;
+            const subjectCenterX = subject.x + subject.width / 2;
+            const subjectCenterY = subject.y + subject.height / 2;
+
+            // Scale to fit height (cover approach)
+            const scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+            const scaledWidth = img.width * scale;
+            const scaledHeight = img.height * scale;
+
+            // Position subject on the desired side
+            let offsetX;
+            const targetX = subjectPosition === 'left' ? canvasWidth * 0.25 : canvasWidth * 0.75;
+            const scaledSubjectX = subjectCenterX * scale;
+            offsetX = targetX - scaledSubjectX;
+
+            // Clamp offset so we don't show empty space
+            offsetX = Math.min(0, offsetX);
+            offsetX = Math.max(canvasWidth - scaledWidth, offsetX);
+
+            // Center vertically
+            const scaledSubjectY = subjectCenterY * scale;
+            let offsetY = (canvasHeight / 2) - scaledSubjectY;
+            offsetY = Math.min(0, offsetY);
+            offsetY = Math.max(canvasHeight - scaledHeight, offsetY);
+
+            bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+
+            // Calculate and show signing area (opposite side of subject)
+            const signingPadding = 20;
+            if (subjectPosition === 'left') {
+                // Subject on left, signing area on right
+                signingAreaBounds = {
+                    x: canvasWidth * 0.5 + signingPadding,
+                    y: signingPadding,
+                    width: canvasWidth * 0.5 - signingPadding * 2,
+                    height: canvasHeight - signingPadding * 2
+                };
+            } else {
+                // Subject on right, signing area on left
+                signingAreaBounds = {
+                    x: signingPadding,
+                    y: signingPadding,
+                    width: canvasWidth * 0.5 - signingPadding * 2,
+                    height: canvasHeight - signingPadding * 2
+                };
+            }
+
+            showSigningArea(signingAreaBounds);
+        }
+
+        function showSigningArea(bounds) {
+            const indicator = document.getElementById('signingArea');
+            indicator.style.left = bounds.x + 'px';
+            indicator.style.top = bounds.y + 'px';
+            indicator.style.width = bounds.width + 'px';
+            indicator.style.height = bounds.height + 'px';
+            indicator.classList.add('visible');
+
+            // Hide after 3 seconds
+            setTimeout(() => {
+                indicator.classList.remove('visible');
+            }, 3000);
+        }
+
+        function hideSigningArea() {
+            const indicator = document.getElementById('signingArea');
+            indicator.classList.remove('visible');
+            signingAreaBounds = null;
+        }
+
+        async function handleBackgroundImage(file) {
+            const img = new Image();
+            img.onload = async () => {
+                backgroundImage = img;
+
+                // Detect subject
+                const statusEl = document.getElementById('modelStatus');
+                statusEl.textContent = 'Detecting subject...';
+                statusEl.className = 'model-status loading';
+
+                detectedSubject = await detectSubject(img);
+
+                if (detectedSubject) {
+                    statusEl.textContent = `Found: ${detectedSubject.class} (${Math.round(detectedSubject.score * 100)}%)`;
+                } else {
+                    statusEl.textContent = 'No subject found';
+                }
+                statusEl.className = 'model-status ready';
+
+                console.log('Detected subject:', detectedSubject);
+                drawBackgroundWithSubject();
+            };
+            img.src = URL.createObjectURL(file);
+        }
+
+        // Background image controls
+        document.getElementById('bgImageInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleBackgroundImage(file);
+            }
+        });
+
+        document.getElementById('subjectLeftBtn').addEventListener('click', () => {
+            subjectPosition = 'left';
+            document.getElementById('subjectLeftBtn').style.background = '#d4a44a';
+            document.getElementById('subjectLeftBtn').style.color = '#1a1a2e';
+            document.getElementById('subjectRightBtn').style.background = '#444';
+            document.getElementById('subjectRightBtn').style.color = '#fff';
+            if (backgroundImage) {
+                drawBackgroundWithSubject();
+            }
+        });
+
+        document.getElementById('subjectRightBtn').addEventListener('click', () => {
+            subjectPosition = 'right';
+            document.getElementById('subjectRightBtn').style.background = '#d4a44a';
+            document.getElementById('subjectRightBtn').style.color = '#1a1a2e';
+            document.getElementById('subjectLeftBtn').style.background = '#444';
+            document.getElementById('subjectLeftBtn').style.color = '#fff';
+            if (backgroundImage) {
+                drawBackgroundWithSubject();
+            }
+        });
+
+        document.getElementById('clearBgBtn').addEventListener('click', () => {
+            backgroundImage = null;
+            detectedSubject = null;
+            hideSigningArea();
+            drawBackground();
+            document.getElementById('modelStatus').textContent = 'AI Ready';
+            document.getElementById('modelStatus').className = 'model-status ready';
+        });
+
+        // Set initial button state
+        document.getElementById('subjectLeftBtn').style.background = '#d4a44a';
+        document.getElementById('subjectLeftBtn').style.color = '#1a1a2e';
 
         // =====================================================================
         // DRAWING STATE
@@ -1053,6 +1472,9 @@
         if (window.PointerEvent) {
             console.log('Golden Ink - Apple Pencil ready');
         }
+
+        // Load the AI model for subject detection
+        loadModel();
     </script>
 </body>
 </html>
