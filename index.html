@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Golden Ink</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #1a1a2e;
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+            padding-bottom: 30px;
+            touch-action: pan-y;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        .header {
+            color: #d4a44a;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 18px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .pencil-status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: #333;
+            color: #888;
+        }
+
+        .pencil-status.active {
+            background: #2a5a2a;
+            color: #6f6;
+        }
+
+        .canvas-container {
+            position: relative;
+            background: #2a2a3e;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            width: 800px;
+            height: 480px;
+            max-width: calc(100vw - 20px);
+        }
+
+        canvas {
+            display: block;
+            touch-action: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #bgCanvas { z-index: 0; }
+        #glowCanvas { z-index: 1; }
+        #doubleCanvas { z-index: 2; }
+        #drawCanvas { z-index: 3; opacity: 0; }
+        #effectCanvas { z-index: 4; pointer-events: none; }
+
+        .controls {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #d4a44a;
+            border: none;
+            border-radius: 8px;
+            color: #1a1a2e;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+
+        button:active {
+            background: #b8903a;
+            transform: scale(0.98);
+        }
+
+        button.secondary {
+            background: #444;
+            color: #fff;
+        }
+
+        .pattern-designer {
+            margin-top: 20px;
+            max-width: calc(100vw - 20px);
+        }
+
+        .pattern-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            color: #d4a44a;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+        }
+
+        .pattern-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .pattern-controls label {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .pattern-controls input[type="range"] {
+            width: 80px;
+        }
+
+        .pattern-container {
+            background: #2a2a3e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #patternCanvas {
+            display: block;
+            width: 100%;
+            cursor: crosshair;
+            position: relative;
+            top: auto;
+            left: auto;
+        }
+
+        .pattern-hint {
+            color: #666;
+            font-size: 11px;
+            margin-top: 6px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span>Golden Ink</span>
+        <span class="pencil-status" id="pencilStatus">No Pencil</span>
+    </div>
+
+    <div class="canvas-container" id="container">
+        <canvas id="bgCanvas"></canvas>
+        <canvas id="glowCanvas"></canvas>
+        <canvas id="doubleCanvas"></canvas>
+        <canvas id="drawCanvas"></canvas>
+        <canvas id="effectCanvas"></canvas>
+    </div>
+
+    <div class="controls">
+        <button id="clearBtn">Clear</button>
+        <button id="undoBtn" class="secondary">Undo</button>
+        <button id="fillBtn" class="secondary">Fill Canvas</button>
+        <button id="playPauseBtn" class="secondary">Pause</button>
+        <button id="playRecordingBtn" class="secondary">Replay</button>
+    </div>
+
+    <div class="controls" style="margin-top: 8px;">
+        <label style="color: #888; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+            Direction:
+            <button id="directionBtn" class="secondary" style="padding: 8px 16px;">→ Right</button>
+        </label>
+        <label style="color: #888; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+            Speed: <input type="range" id="speedSlider" min="1" max="10" value="2" style="width: 80px;">
+            <span id="speedValue">2</span>
+        </label>
+    </div>
+
+    <div class="pattern-designer">
+        <div class="pattern-header">
+            <span>Pattern Designer</span>
+            <div class="pattern-controls">
+                <label>Brush: <input type="range" id="patternBrushSize" min="10" max="100" value="40"></label>
+                <button id="resetPatternBtn" class="secondary" style="padding:8px 12px;">Reset Gold</button>
+            </div>
+        </div>
+        <div class="pattern-container" id="patternContainer">
+            <canvas id="patternCanvas"></canvas>
+        </div>
+        <div class="pattern-hint">Paint cream/white highlights on gold background - this pattern will animate over your handwriting</div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // CONFIGURATION - Locked in chisel calligraphy settings
+        // =====================================================================
+        const config = {
+            // Pressure settings
+            pressureEnabled: true,
+            pressureMultiplier: 1.2,
+            pressureCurve: 0.8,
+
+            // Width settings
+            minWidth: 2,
+            maxWidth: 28,  // Heavier downstrokes
+
+            // Smoothing
+            smoothingEnabled: true,
+            smoothingFactor: 0.6,  // Higher = smoother strokes
+
+            // Velocity-based width
+            velocityEnabled: true,
+            velocityFactor: 0.3,
+
+            // Palm rejection
+            palmRejection: true,
+
+            // Chisel mode - DISABLED for smoother strokes
+            chiselMode: false,
+            chiselRatio: 4,
+            chiselAngle: 45,
+
+            // Stabilizer
+            stabilizerEnabled: true,
+            stabilizerStrength: 0.5,  // Higher = more stable strokes
+
+            // Direction-based width (calligraphy) - downstrokes are thicker
+            directionWidthEnabled: true,
+            directionWidthMin: 0.02,  // Non-downstrokes are 2% width - much thinner
+
+            // Effects
+            doubleStrokeEnabled: true,
+            doubleStrokeOffset: 2,      // Pixel offset for doubled stroke
+            doubleStrokeColor: '#CC6600', // Darker orange shadow
+
+            // Main stroke color (white/cream)
+            strokeColor: '#FFFFFF', // White strokes
+
+            // Radial glow behind text (like a spotlight/energy source)
+            radialGlowEnabled: true,
+        };
+
+        // =====================================================================
+        // CANVAS SETUP
+        // =====================================================================
+        const container = document.getElementById('container');
+        const bgCanvas = document.getElementById('bgCanvas');
+        const glowCanvas = document.getElementById('glowCanvas');
+        const doubleCanvas = document.getElementById('doubleCanvas');
+        const drawCanvas = document.getElementById('drawCanvas');
+        const effectCanvas = document.getElementById('effectCanvas');
+
+        const bgCtx = bgCanvas.getContext('2d');
+        const glowCtx = glowCanvas.getContext('2d');
+        const doubleCtx = doubleCanvas.getContext('2d');
+        const drawCtx = drawCanvas.getContext('2d');
+        const effectCtx = effectCanvas.getContext('2d');
+
+        let canvasWidth, canvasHeight;
+
+        function setupCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+
+            const maxWidth = Math.min(800, window.innerWidth - 20);
+            const maxHeight = Math.min(480, window.innerHeight - 150);
+
+            let width = maxWidth;
+            let height = width * 0.6;
+
+            if (height > maxHeight) {
+                height = maxHeight;
+                width = height / 0.6;
+            }
+
+            canvasWidth = width;
+            canvasHeight = height;
+
+            container.style.width = width + 'px';
+            container.style.height = height + 'px';
+
+            [bgCanvas, glowCanvas, doubleCanvas, drawCanvas, effectCanvas].forEach(canvas => {
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                canvas.style.width = width + 'px';
+                canvas.style.height = height + 'px';
+
+                const ctx = canvas.getContext('2d');
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+            });
+
+            // Set up drawing contexts
+            drawCtx.lineCap = 'round';
+            drawCtx.lineJoin = 'round';
+            drawCtx.strokeStyle = '#FFFFFF';
+
+            doubleCtx.lineCap = 'round';
+            doubleCtx.lineJoin = 'round';
+            doubleCtx.strokeStyle = config.doubleStrokeColor;
+
+            glowCtx.lineCap = 'round';
+            glowCtx.lineJoin = 'round';
+
+            // Draw background
+            bgCtx.fillStyle = '#3a3a4e';
+            bgCtx.fillRect(0, 0, width, height);
+        }
+
+        setupCanvas();
+        window.addEventListener('resize', setupCanvas);
+
+        // =====================================================================
+        // DRAWING STATE
+        // =====================================================================
+        let isDrawing = false;
+        let currentStroke = [];
+        let allStrokes = [];
+        let lastPoint = null;
+        let lastTime = 0;
+        let lastWidth = config.minWidth;
+        let isPenDetected = false;
+
+        // Smoothing state
+        let smoothX = 0, smoothY = 0;
+        let smoothPressure = 0;
+
+        // Stabilizer state
+        let stabilizerX = 0, stabilizerY = 0;
+
+        // Metallic animation state
+        let metallicOffset = 0;
+        let animationId = null;
+        let isCanvasFilled = false;
+        let isPaused = false;
+        let animationDirection = 1;  // 1 = right, -1 = left
+        let animationSpeed = 2;      // pixels per frame
+
+        // Recording state - always recording
+        let recordedEvents = [];     // Stores {type, data, time} events
+        let recordingStartTime = 0;
+        let isPlayingRecording = false;
+        let hasStartedRecording = false;  // Track if we've started timing
+
+        // =====================================================================
+        // METALLIC GRADIENT ANIMATION - Shiny gold effect
+        // =====================================================================
+        function startMetallicAnimation() {
+            if (animationId) return;
+
+            function animate() {
+                metallicOffset += animationSpeed * animationDirection;
+                // Wrap around in both directions
+                if (metallicOffset > patternWidth) {
+                    metallicOffset = 0;
+                } else if (metallicOffset < 0) {
+                    metallicOffset = patternWidth;
+                }
+                updateMetallicMask();
+                animationId = requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        function stopMetallicAnimation() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        }
+
+        function updateMetallicMask() {
+            // Clear effect canvas
+            effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            if (allStrokes.length === 0) {
+                return;
+            }
+
+            // Calculate bounding box of strokes
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const stroke of allStrokes) {
+                for (const pt of stroke) {
+                    minX = Math.min(minX, pt.x);
+                    minY = Math.min(minY, pt.y);
+                    maxX = Math.max(maxX, pt.x);
+                    maxY = Math.max(maxY, pt.y);
+                }
+            }
+
+            const centerY = (minY + maxY) / 2;
+            const width = maxX - minX;
+            const height = maxY - minY;
+
+            // Moving spotlight center - travels left to right across the text
+            const spotX = minX - 100 + (metallicOffset % (width + 400));
+            const spotRadius = Math.max(width, height) * 0.6;
+
+            // Create radial gradient - soft glowing spotlight (like reference_gradient.png)
+            const gradient = effectCtx.createRadialGradient(
+                spotX, centerY, 0,
+                spotX, centerY, spotRadius
+            );
+
+            // Soft glow: bright cream center fading to orange (like the reference)
+            gradient.addColorStop(0, '#FFFEF0');     // Bright cream/white center
+            gradient.addColorStop(0.2, '#FFE4A0');   // Light gold
+            gradient.addColorStop(0.4, '#FFD700');   // Gold
+            gradient.addColorStop(0.6, '#FFA500');   // Orange
+            gradient.addColorStop(0.8, '#E07800');   // Darker orange
+            gradient.addColorStop(1, '#CC6600');     // Dark orange edge
+
+            // Step 1: Copy the white strokes from drawCanvas to effectCanvas
+            effectCtx.drawImage(drawCanvas, 0, 0, canvasWidth, canvasHeight);
+
+            // Step 2: Use source-in to replace white with glowing gradient
+            effectCtx.globalCompositeOperation = 'source-in';
+            effectCtx.fillStyle = gradient;
+            effectCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+            effectCtx.globalCompositeOperation = 'source-over';
+        }
+
+        // Alias for backward compatibility
+        function updateRadialGlow() {
+            updateMetallicMask();
+        }
+
+        function updateGradientMask() {
+            updateMetallicMask();
+        }
+
+        // =====================================================================
+        // INPUT HANDLING
+        // =====================================================================
+        function getPointerData(e) {
+            const rect = drawCanvas.getBoundingClientRect();
+
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            return {
+                x: x,
+                y: y,
+                pressure: e.pressure || 0.5,
+                tiltX: e.tiltX || 0,
+                tiltY: e.tiltY || 0,
+                pointerType: e.pointerType || 'mouse',
+                time: performance.now(),
+                isPen: e.pointerType === 'pen',
+            };
+        }
+
+        function calculateWidth(pointerData, velocity) {
+            let width = (config.minWidth + config.maxWidth) / 2;
+
+            // Pressure-based width
+            if (config.pressureEnabled && pointerData.isPen) {
+                let adjustedPressure = Math.pow(pointerData.pressure, config.pressureCurve);
+                adjustedPressure = Math.min(1, adjustedPressure * config.pressureMultiplier);
+                width = config.minWidth + (config.maxWidth - config.minWidth) * adjustedPressure;
+            }
+
+            // Velocity adjustment
+            if (config.velocityEnabled && velocity > 0) {
+                const velocityFactor = Math.max(0.3, 1 - velocity * config.velocityFactor * 0.01);
+                width *= velocityFactor;
+            }
+
+            // Direction-based width (calligraphy)
+            if (config.directionWidthEnabled && pointerData.direction !== undefined) {
+                const dir = pointerData.direction;
+                if (dir.y > 0.2) {
+                    const downAmount = (dir.y - 0.2) / 0.8;
+                    const directionMultiplier = config.directionWidthMin +
+                        (1 - config.directionWidthMin) * downAmount;
+                    width *= directionMultiplier;
+                } else {
+                    width *= config.directionWidthMin;
+                }
+            }
+
+            return Math.max(config.minWidth, Math.min(config.maxWidth, width));
+        }
+
+        // =====================================================================
+        // DRAWING FUNCTIONS
+        // =====================================================================
+        function startStroke(e) {
+            if (isPlayingRecording) return;  // Don't allow drawing during playback
+
+            if (config.palmRejection && e.pointerType === 'touch' && isPenDetected) {
+                return;
+            }
+
+            e.preventDefault();
+            isDrawing = true;
+
+            const data = getPointerData(e);
+
+            // Always record - start timing on first stroke
+            if (!hasStartedRecording) {
+                recordingStartTime = performance.now();
+                hasStartedRecording = true;
+            }
+            recordedEvents.push({
+                type: 'start',
+                data: {...data},
+                time: performance.now() - recordingStartTime
+            });
+
+            if (data.isPen) {
+                isPenDetected = true;
+                document.getElementById('pencilStatus').textContent = 'Pencil Active';
+                document.getElementById('pencilStatus').classList.add('active');
+            }
+
+            smoothX = data.x;
+            smoothY = data.y;
+            smoothPressure = data.pressure;
+            stabilizerX = data.x;
+            stabilizerY = data.y;
+
+            // Start animation immediately
+            if (!animationId) {
+                startMetallicAnimation();
+            }
+
+            currentStroke = [data];
+            lastPoint = data;
+            lastTime = data.time;
+            lastWidth = calculateWidth(data, 0);
+        }
+
+        function continueStroke(e) {
+            if (!isDrawing) return;
+
+            if (config.palmRejection && e.pointerType === 'touch' && isPenDetected) {
+                return;
+            }
+
+            e.preventDefault();
+
+            const data = getPointerData(e);
+
+            // Always record
+            recordedEvents.push({
+                type: 'move',
+                data: {...data},
+                time: performance.now() - recordingStartTime
+            });
+
+            // Apply stabilizer
+            if (config.stabilizerEnabled && config.stabilizerStrength > 0) {
+                const strength = config.stabilizerStrength;
+                stabilizerX = stabilizerX + (data.x - stabilizerX) * (1 - strength);
+                stabilizerY = stabilizerY + (data.y - stabilizerY) * (1 - strength);
+                data.x = stabilizerX;
+                data.y = stabilizerY;
+            }
+
+            // Apply smoothing
+            if (config.smoothingEnabled) {
+                smoothX += (data.x - smoothX) * config.smoothingFactor;
+                smoothY += (data.y - smoothY) * config.smoothingFactor;
+                smoothPressure += (data.pressure - smoothPressure) * config.smoothingFactor;
+                data.x = smoothX;
+                data.y = smoothY;
+                data.pressure = smoothPressure;
+            }
+
+            // Calculate velocity and direction
+            const dx = data.x - lastPoint.x;
+            const dy = data.y - lastPoint.y;
+            const dt = Math.max(1, data.time - lastTime);
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const velocity = distance / dt * 10;
+
+            if (distance > 0.5) {
+                data.direction = { x: dx / distance, y: dy / distance };
+            } else {
+                data.direction = lastPoint.direction || { x: 0, y: 1 };
+            }
+
+            const targetWidth = calculateWidth(data, velocity);
+            const width = lastWidth * 0.85 + targetWidth * 0.15;
+            data.width = width;
+
+            // Draw on all layers
+            drawSegment(lastPoint, data, lastWidth, width);
+
+            currentStroke.push(data);
+            lastPoint = data;
+            lastTime = data.time;
+            lastWidth = width;
+        }
+
+        function endStroke(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            // Always record
+            recordedEvents.push({
+                type: 'end',
+                data: {},
+                time: performance.now() - recordingStartTime
+            });
+
+            if (currentStroke.length > 0) {
+                allStrokes.push([...currentStroke]);
+                // Start metallic animation
+                if (!animationId) {
+                    startMetallicAnimation();
+                }
+            }
+
+            currentStroke = [];
+            lastPoint = null;
+        }
+
+        function drawSegment(from, to, fromWidth, toWidth) {
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+
+            if (len < 0.5) return;
+
+            // Calculate chisel width
+            let width = (fromWidth + toWidth) / 2;
+
+            if (config.chiselMode) {
+                const chiselAngle = config.chiselAngle * Math.PI / 180;
+                const strokeAngle = Math.atan2(dy, dx);
+                let angleDiff = Math.abs(strokeAngle - chiselAngle);
+                while (angleDiff > Math.PI) angleDiff -= Math.PI;
+                if (angleDiff > Math.PI / 2) angleDiff = Math.PI - angleDiff;
+
+                const widthFactor = Math.abs(Math.sin(angleDiff * 2));
+                const minFactor = 1 / config.chiselRatio;
+                const actualFactor = minFactor + (1 - minFactor) * widthFactor;
+                width *= actualFactor;
+            }
+
+            // Draw double stroke (darker, offset behind main)
+            if (config.doubleStrokeEnabled) {
+                const offset = config.doubleStrokeOffset;
+                doubleCtx.beginPath();
+                doubleCtx.moveTo(from.x + offset, from.y + offset);
+                doubleCtx.lineTo(to.x + offset, to.y + offset);
+                doubleCtx.lineWidth = Math.max(1, width);
+                doubleCtx.strokeStyle = config.doubleStrokeColor;
+                doubleCtx.lineCap = config.chiselMode ? 'square' : 'round';
+                doubleCtx.lineJoin = config.chiselMode ? 'miter' : 'round';
+                doubleCtx.stroke();
+            }
+
+            // Draw main stroke (solid orange/gold)
+            drawCtx.beginPath();
+            drawCtx.moveTo(from.x, from.y);
+            drawCtx.lineTo(to.x, to.y);
+            drawCtx.lineWidth = Math.max(1, width);
+            drawCtx.strokeStyle = config.strokeColor;
+            drawCtx.lineCap = config.chiselMode ? 'square' : 'round';
+            drawCtx.lineJoin = config.chiselMode ? 'miter' : 'round';
+            drawCtx.stroke();
+        }
+
+        function redrawAllStrokes() {
+            // Clear all drawing layers
+            glowCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            doubleCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            drawCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // Redraw all strokes
+            for (const stroke of allStrokes) {
+                for (let i = 1; i < stroke.length; i++) {
+                    const from = stroke[i - 1];
+                    const to = stroke[i];
+                    const fromWidth = from.width || config.minWidth;
+                    const toWidth = to.width || config.minWidth;
+                    drawSegment(from, to, fromWidth, toWidth);
+                }
+            }
+        }
+
+        // =====================================================================
+        // EVENT LISTENERS
+        // =====================================================================
+        drawCanvas.addEventListener('pointerdown', startStroke);
+        drawCanvas.addEventListener('pointermove', continueStroke);
+        drawCanvas.addEventListener('pointerup', endStroke);
+        drawCanvas.addEventListener('pointercancel', endStroke);
+        drawCanvas.addEventListener('pointerleave', endStroke);
+
+        drawCanvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+        drawCanvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+        // =====================================================================
+        // UI CONTROLS
+        // =====================================================================
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            stopMetallicAnimation();
+            glowCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            doubleCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            drawCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            allStrokes = [];
+            currentStroke = [];
+            // Reset recording
+            recordedEvents = [];
+            hasStartedRecording = false;
+        });
+
+        document.getElementById('undoBtn').addEventListener('click', () => {
+            if (allStrokes.length === 0) return;
+            allStrokes.pop();
+            redrawAllStrokes();
+            if (allStrokes.length === 0) {
+                stopMetallicAnimation();
+            }
+        });
+
+        // Fill Canvas button - fills the entire canvas to preview gradient
+        document.getElementById('fillBtn').addEventListener('click', () => {
+            if (isCanvasFilled) {
+                // Clear the fill
+                drawCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+                allStrokes = [];
+                isCanvasFilled = false;
+                document.getElementById('fillBtn').textContent = 'Fill Canvas';
+                if (!isPaused) {
+                    stopMetallicAnimation();
+                }
+                effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            } else {
+                // Fill the canvas with white (solid rectangle)
+                drawCtx.fillStyle = '#FFFFFF';
+                drawCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+                isCanvasFilled = true;
+                document.getElementById('fillBtn').textContent = 'Clear Fill';
+                // Start animation to show the gradient
+                if (!isPaused && !animationId) {
+                    startMetallicAnimation();
+                } else {
+                    // If paused, just show current frame
+                    updateMetallicMask();
+                }
+            }
+        });
+
+        // Play/Pause button for gradient animation
+        document.getElementById('playPauseBtn').addEventListener('click', () => {
+            if (isPaused) {
+                // Resume
+                isPaused = false;
+                document.getElementById('playPauseBtn').textContent = 'Pause';
+                if (allStrokes.length > 0 || isCanvasFilled) {
+                    startMetallicAnimation();
+                }
+            } else {
+                // Pause
+                isPaused = true;
+                document.getElementById('playPauseBtn').textContent = 'Play';
+                stopMetallicAnimation();
+                // Keep the current frame visible
+                updateMetallicMask();
+            }
+        });
+
+        // Direction toggle
+        document.getElementById('directionBtn').addEventListener('click', () => {
+            animationDirection *= -1;
+            const btn = document.getElementById('directionBtn');
+            btn.textContent = animationDirection === 1 ? '→ Right' : '← Left';
+        });
+
+        // Speed slider
+        document.getElementById('speedSlider').addEventListener('input', (e) => {
+            animationSpeed = parseInt(e.target.value);
+            document.getElementById('speedValue').textContent = animationSpeed;
+        });
+
+        // Replay button - plays back recorded strokes with original timing
+        document.getElementById('playRecordingBtn').addEventListener('click', () => {
+            if (recordedEvents.length === 0) {
+                alert('Nothing to replay. Draw something first!');
+                return;
+            }
+            if (isPlayingRecording) return;
+
+            // Clear canvas before playback
+            stopMetallicAnimation();
+            glowCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            doubleCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            drawCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+            allStrokes = [];
+            currentStroke = [];
+
+            isPlayingRecording = true;
+            const btn = document.getElementById('playRecordingBtn');
+            btn.textContent = 'Playing...';
+            btn.disabled = true;
+
+            // Play back each event at the recorded time (preserves pauses)
+            const playbackStart = performance.now();
+            let eventIndex = 0;
+
+            function playNextEvent() {
+                if (eventIndex >= recordedEvents.length) {
+                    // Playback complete
+                    isPlayingRecording = false;
+                    btn.textContent = 'Replay';
+                    btn.disabled = false;
+                    return;
+                }
+
+                const elapsed = performance.now() - playbackStart;
+
+                // Process ALL events that should have happened by now
+                while (eventIndex < recordedEvents.length && recordedEvents[eventIndex].time <= elapsed) {
+                    const event = recordedEvents[eventIndex];
+                    const data = {...event.data};  // Clone to avoid modifying original
+
+                    if (event.type === 'start') {
+                        // Simulate stroke start
+                        isDrawing = true;
+                        smoothX = data.x;
+                        smoothY = data.y;
+                        smoothPressure = data.pressure;
+                        stabilizerX = data.x;
+                        stabilizerY = data.y;
+                        if (!animationId) startMetallicAnimation();
+                        currentStroke = [data];
+                        lastPoint = data;
+                        lastTime = data.time;
+                        lastWidth = calculateWidth(data, 0);
+                    } else if (event.type === 'move' && isDrawing) {
+                        // Apply stabilizer
+                        if (config.stabilizerEnabled && config.stabilizerStrength > 0) {
+                            const strength = config.stabilizerStrength;
+                            stabilizerX = stabilizerX + (data.x - stabilizerX) * (1 - strength);
+                            stabilizerY = stabilizerY + (data.y - stabilizerY) * (1 - strength);
+                            data.x = stabilizerX;
+                            data.y = stabilizerY;
+                        }
+                        // Apply smoothing
+                        if (config.smoothingEnabled) {
+                            smoothX += (data.x - smoothX) * config.smoothingFactor;
+                            smoothY += (data.y - smoothY) * config.smoothingFactor;
+                            smoothPressure += (data.pressure - smoothPressure) * config.smoothingFactor;
+                            data.x = smoothX;
+                            data.y = smoothY;
+                            data.pressure = smoothPressure;
+                        }
+                        // Calculate velocity and direction
+                        const dx = data.x - lastPoint.x;
+                        const dy = data.y - lastPoint.y;
+                        const dt = Math.max(1, data.time - lastTime);
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        const velocity = distance / dt * 10;
+                        if (distance > 0.5) {
+                            data.direction = { x: dx / distance, y: dy / distance };
+                        } else {
+                            data.direction = lastPoint.direction || { x: 0, y: 1 };
+                        }
+                        const targetWidth = calculateWidth(data, velocity);
+                        const width = lastWidth * 0.85 + targetWidth * 0.15;
+                        data.width = width;
+                        drawSegment(lastPoint, data, lastWidth, width);
+                        currentStroke.push(data);
+                        lastPoint = data;
+                        lastTime = data.time;
+                        lastWidth = width;
+                    } else if (event.type === 'end') {
+                        isDrawing = false;
+                        if (currentStroke.length > 0) {
+                            allStrokes.push([...currentStroke]);
+                        }
+                        currentStroke = [];
+                        lastPoint = null;
+                    }
+
+                    eventIndex++;
+                }
+
+                requestAnimationFrame(playNextEvent);
+            }
+
+            playNextEvent();
+        });
+
+        // =====================================================================
+        // PATTERN DESIGNER CANVAS
+        // =====================================================================
+        const patternCanvas = document.getElementById('patternCanvas');
+        const patternCtx = patternCanvas.getContext('2d');
+        const patternContainer = document.getElementById('patternContainer');
+        let patternWidth = 800;
+        let patternHeight = 120;
+        let isPatternDrawing = false;
+
+        function setupPatternCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+
+            // Match the main canvas dimensions
+            patternWidth = canvasWidth || 800;
+            patternHeight = canvasHeight || 480;
+
+            patternCanvas.width = patternWidth * dpr;
+            patternCanvas.height = patternHeight * dpr;
+            patternCanvas.style.width = patternWidth + 'px';
+            patternCanvas.style.height = patternHeight + 'px';
+
+            // Update container to match
+            const container = document.getElementById('patternContainer');
+            if (container) {
+                container.style.width = patternWidth + 'px';
+                container.style.height = patternHeight + 'px';
+            }
+
+            // Also update the pattern-designer wrapper
+            const designer = document.querySelector('.pattern-designer');
+            if (designer) {
+                designer.style.width = patternWidth + 'px';
+            }
+
+            patternCtx.setTransform(1, 0, 0, 1, 0, 0);
+            patternCtx.scale(dpr, dpr);
+
+            resetPatternToGold();
+        }
+
+        function resetPatternToGold() {
+            // Solid light copper/bronze
+            patternCtx.fillStyle = '#CD7F32';  // Light bronze/copper
+            patternCtx.fillRect(0, 0, patternWidth, patternHeight);
+        }
+
+        function paintOnPattern(e) {
+            const rect = patternCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const brushSize = parseInt(document.getElementById('patternBrushSize').value);
+
+            // Round brush with smooth yellow cream gradient
+            const gradient = patternCtx.createRadialGradient(x, y, 0, x, y, brushSize);
+            gradient.addColorStop(0, 'rgba(255, 245, 180, 0.5)');     // Yellow cream center
+            gradient.addColorStop(0.05, 'rgba(255, 243, 175, 0.45)');
+            gradient.addColorStop(0.1, 'rgba(255, 240, 170, 0.4)');
+            gradient.addColorStop(0.15, 'rgba(255, 238, 165, 0.35)');
+            gradient.addColorStop(0.2, 'rgba(255, 235, 160, 0.3)');
+            gradient.addColorStop(0.25, 'rgba(255, 232, 155, 0.25)');
+            gradient.addColorStop(0.3, 'rgba(255, 230, 150, 0.2)');
+            gradient.addColorStop(0.4, 'rgba(255, 225, 145, 0.15)');
+            gradient.addColorStop(0.5, 'rgba(255, 220, 140, 0.1)');
+            gradient.addColorStop(0.6, 'rgba(255, 215, 135, 0.07)');
+            gradient.addColorStop(0.7, 'rgba(255, 210, 130, 0.04)');
+            gradient.addColorStop(0.8, 'rgba(255, 205, 125, 0.02)');
+            gradient.addColorStop(0.9, 'rgba(255, 200, 120, 0.01)');
+            gradient.addColorStop(1, 'rgba(255, 195, 115, 0)');
+
+            patternCtx.fillStyle = gradient;
+            patternCtx.beginPath();
+            patternCtx.arc(x, y, brushSize, 0, Math.PI * 2);
+            patternCtx.fill();
+        }
+
+        // Pattern canvas events
+        patternCanvas.addEventListener('pointerdown', (e) => {
+            isPatternDrawing = true;
+            paintOnPattern(e);
+        });
+
+        patternCanvas.addEventListener('pointermove', (e) => {
+            if (isPatternDrawing) {
+                paintOnPattern(e);
+            }
+        });
+
+        patternCanvas.addEventListener('pointerup', () => {
+            isPatternDrawing = false;
+        });
+
+        patternCanvas.addEventListener('pointerleave', () => {
+            isPatternDrawing = false;
+        });
+
+        document.getElementById('resetPatternBtn').addEventListener('click', resetPatternToGold);
+
+        // Initialize pattern canvas
+        setupPatternCanvas();
+        window.addEventListener('resize', setupPatternCanvas);
+
+        // =====================================================================
+        // UPDATE METALLIC MASK TO USE PATTERN CANVAS
+        // =====================================================================
+        // Override the updateMetallicMask to use the pattern canvas
+        const originalUpdateMetallicMask = updateMetallicMask;
+        updateMetallicMask = function() {
+            // Check if there's anything to render (completed strokes, active drawing, or filled canvas)
+            const hasContent = allStrokes.length > 0 || currentStroke.length > 0 || isCanvasFilled;
+            if (!hasContent) {
+                effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+                return;
+            }
+
+            // Calculate offset for scrolling pattern
+            const patternOffset = metallicOffset % patternWidth;
+
+            // Clear effect canvas
+            effectCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // Step 1: Draw the pattern first (this will be the visible result)
+            for (let x = -patternOffset; x < canvasWidth + patternWidth; x += patternWidth) {
+                effectCtx.drawImage(patternCanvas,
+                    0, 0, patternCanvas.width, patternCanvas.height,
+                    x, 0, patternWidth, canvasHeight);
+            }
+
+            // Step 2: Apply mask using destination-in
+            // Pattern (destination) will only show where mask (source) is non-transparent
+            effectCtx.globalCompositeOperation = 'destination-in';
+
+            if (isCanvasFilled) {
+                // Fill entire canvas - pattern shows everywhere
+                effectCtx.fillStyle = '#FFFFFF';
+                effectCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+            } else {
+                // Copy strokes from drawCanvas as the mask
+                effectCtx.drawImage(drawCanvas,
+                    0, 0, drawCanvas.width, drawCanvas.height,
+                    0, 0, canvasWidth, canvasHeight);
+            }
+
+            effectCtx.globalCompositeOperation = 'source-over';
+        };
+
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
+        if (window.PointerEvent) {
+            console.log('Golden Ink - Apple Pencil ready');
+        }
+    </script>
+</body>
+</html>
