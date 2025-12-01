@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.8</span>
+        <span style="font-size: 10px; color: #666;">v2.9</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -291,6 +291,7 @@
         </label>
         <button id="reprocessBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Reprocess</button>
         <button id="drawOutlineBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Draw Outline</button>
+        <button id="clearOutlineBtn" class="secondary" style="padding: 6px 12px; font-size: 11px; display: none;">Clear Outline</button>
         <button id="cleanupBrushBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Cleanup Brush</button>
     </div>
 
@@ -1263,11 +1264,15 @@
         document.getElementById('drawOutlineBtn').addEventListener('click', () => {
             drawingOutline = !drawingOutline;
             const btn = document.getElementById('drawOutlineBtn');
+            const clearBtn = document.getElementById('clearOutlineBtn');
             if (drawingOutline) {
                 btn.style.background = '#d4a44a';
                 btn.style.color = '#1a1a2e';
                 btn.textContent = 'Finish Outline';
                 outlinePoints = [];
+                // Clear any existing outline from effect canvas
+                const effectCtx = effectCanvas.getContext('2d');
+                effectCtx.clearRect(0, 0, effectCanvas.width, effectCanvas.height);
                 alert('Draw a rough outline around the subject you want to keep. Click "Finish Outline" when done.');
             } else {
                 btn.style.background = '#444';
@@ -1283,11 +1288,26 @@
                         width: Math.max(...xs) - Math.min(...xs),
                         height: Math.max(...ys) - Math.min(...ys)
                     };
+                    // Show clear button since we have an outline
+                    clearBtn.style.display = 'inline-block';
                     // Reprocess with user outline
                     backgroundImageRemoved = null;
                     processBackgroundRemoval();
                 }
             }
+        });
+
+        // Clear outline button
+        document.getElementById('clearOutlineBtn').addEventListener('click', () => {
+            userOutline = null;
+            outlinePoints = [];
+            document.getElementById('clearOutlineBtn').style.display = 'none';
+            // Clear effect canvas
+            const effectCtx = effectCanvas.getContext('2d');
+            effectCtx.clearRect(0, 0, effectCanvas.width, effectCanvas.height);
+            // Reprocess without user outline (use auto-detection)
+            backgroundImageRemoved = null;
+            processBackgroundRemoval();
         });
 
         // Cleanup brush button
@@ -1514,12 +1534,10 @@
             if (drawingOutline || cleanupMode) {
                 e.preventDefault();
                 if (drawingOutline) {
-                    // Handle outline drawing
-                    const rect = drawCanvas.getBoundingClientRect();
-                    const scaleX = drawCanvas.width / rect.width;
-                    const scaleY = drawCanvas.height / rect.height;
-                    const x = (e.clientX - rect.left) * scaleX;
-                    const y = (e.clientY - rect.top) * scaleY;
+                    // Handle outline drawing - use screen coordinates (context already has DPR scale)
+                    const rect = effectCanvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
                     outlinePoints.push({x, y});
                     const effectCtx = effectCanvas.getContext('2d');
                     effectCtx.strokeStyle = '#ff0';
@@ -1624,11 +1642,10 @@
             if (drawingOutline || cleanupMode) {
                 e.preventDefault();
                 if (drawingOutline && outlinePoints.length > 0) {
-                    const rect = drawCanvas.getBoundingClientRect();
-                    const scaleX = drawCanvas.width / rect.width;
-                    const scaleY = drawCanvas.height / rect.height;
-                    const x = (e.clientX - rect.left) * scaleX;
-                    const y = (e.clientY - rect.top) * scaleY;
+                    // Use screen coordinates (context already has DPR scale)
+                    const rect = effectCanvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
                     outlinePoints.push({x, y});
                     const effectCtx = effectCanvas.getContext('2d');
                     effectCtx.strokeStyle = '#ff0';
