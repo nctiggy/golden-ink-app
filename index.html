@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.2</span>
+        <span style="font-size: 10px; color: #666;">v2.3</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -978,10 +978,10 @@
                 const width = maskCanvas.width;
                 const height = maskCanvas.height;
 
-                // Convert to binary mask (threshold at 128)
+                // Convert to binary mask (high threshold to break weak connections)
                 const binary = new Uint8Array(width * height);
                 for (let i = 0; i < binary.length; i++) {
-                    binary[i] = maskData[i * 4] > 128 ? 1 : 0;
+                    binary[i] = maskData[i * 4] > 200 ? 1 : 0;
                 }
 
                 // Find connected components using flood fill
@@ -1025,10 +1025,39 @@
                     }
                 }
 
-                // Update mask to keep only the largest component
+                // Create a mask of pixels belonging to largest component
+                const inLargest = new Uint8Array(width * height);
                 for (let i = 0; i < labels.length; i++) {
-                    if (labels[i] !== largestLabel) {
-                        // Not the largest component - make transparent
+                    inLargest[i] = labels[i] === largestLabel ? 1 : 0;
+                }
+
+                // Dilate the largest component mask to include edge pixels
+                const dilated = new Uint8Array(width * height);
+                const dilateRadius = 5;
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = y * width + x;
+                        if (inLargest[idx]) {
+                            dilated[idx] = 1;
+                        } else {
+                            // Check if near the largest component
+                            let near = false;
+                            for (let dy = -dilateRadius; dy <= dilateRadius && !near; dy++) {
+                                for (let dx = -dilateRadius; dx <= dilateRadius && !near; dx++) {
+                                    const ny = y + dy, nx = x + dx;
+                                    if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                                        if (inLargest[ny * width + nx]) near = true;
+                                    }
+                                }
+                            }
+                            dilated[idx] = near ? 1 : 0;
+                        }
+                    }
+                }
+
+                // Update mask: keep only pixels in dilated region of largest component
+                for (let i = 0; i < labels.length; i++) {
+                    if (!dilated[i]) {
                         maskData[i * 4] = 0;
                         maskData[i * 4 + 1] = 0;
                         maskData[i * 4 + 2] = 0;
