@@ -7,6 +7,11 @@
     <!-- TensorFlow.js and COCO-SSD for subject detection -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+    <!-- Background removal library -->
+    <script type="module">
+        import imglyRemoveBackground from 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm';
+        window.imglyRemoveBackground = imglyRemoveBackground;
+    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -264,6 +269,16 @@
         <span class="model-status" id="modelStatus">Loading AI model...</span>
     </div>
 
+    <!-- Background Effect Controls -->
+    <div class="bg-controls" style="margin-top: 8px;">
+        <span style="color: #888; font-size: 12px;">Background:</span>
+        <button id="bgModeNormal" class="secondary" style="padding: 8px 12px;">Normal</button>
+        <button id="bgModeBlur" class="secondary" style="padding: 8px 12px;">Blur</button>
+        <button id="bgModeFade" class="secondary" style="padding: 8px 12px;">Fade</button>
+        <button id="bgModeRemove" class="secondary" style="padding: 8px 12px;">Remove</button>
+        <span class="model-status" id="bgEffectStatus"></span>
+    </div>
+
     <div class="controls">
         <button id="clearBtn">Clear Drawing</button>
         <button id="undoBtn" class="secondary">Undo</button>
@@ -367,11 +382,15 @@
 
         // Background image state
         let backgroundImage = null;
+        let backgroundImageOriginal = null;  // Keep original for reprocessing
+        let backgroundImageRemoved = null;   // Cached removed background version
         let detectedSubject = null;
         let subjectPosition = 'left';  // 'left' or 'right'
         let autoPositionSubject = true;  // Auto-detect optimal side
         let cocoModel = null;
         let signingAreaBounds = null;
+        let bgMode = 'normal';  // 'normal', 'blur', 'fade', 'remove'
+        let isProcessingBg = false;
 
         function setupCanvas() {
             const dpr = window.devicePixelRatio || 1;
@@ -691,7 +710,57 @@
             }
             // Otherwise, let bottom be cropped/empty to preserve the head
 
-            bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+            // Draw based on background mode
+            if (bgMode === 'remove' && backgroundImageRemoved) {
+                // Use the pre-processed removed background image
+                bgCtx.drawImage(backgroundImageRemoved, offsetX, offsetY, scaledWidth, scaledHeight);
+            } else if (bgMode === 'blur') {
+                // Draw blurred background first
+                bgCtx.filter = 'blur(8px)';
+                bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+                bgCtx.filter = 'none';
+
+                // Draw sharp subject on top using a mask
+                if (detectedSubject) {
+                    const sx = subject.x * scale + offsetX;
+                    const sy = subject.y * scale + offsetY;
+                    const sw = subject.width * scale;
+                    const sh = subject.height * scale;
+
+                    // Expand the subject area slightly for better coverage
+                    const padding = sw * 0.15;
+                    bgCtx.save();
+                    bgCtx.beginPath();
+                    bgCtx.ellipse(sx + sw/2, sy + sh/2, sw/2 + padding, sh/2 + padding, 0, 0, Math.PI * 2);
+                    bgCtx.clip();
+                    bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+                    bgCtx.restore();
+                }
+            } else if (bgMode === 'fade') {
+                // Draw faded background
+                bgCtx.globalAlpha = 0.3;
+                bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+                bgCtx.globalAlpha = 1.0;
+
+                // Draw subject area at full opacity
+                if (detectedSubject) {
+                    const sx = subject.x * scale + offsetX;
+                    const sy = subject.y * scale + offsetY;
+                    const sw = subject.width * scale;
+                    const sh = subject.height * scale;
+
+                    const padding = sw * 0.15;
+                    bgCtx.save();
+                    bgCtx.beginPath();
+                    bgCtx.ellipse(sx + sw/2, sy + sh/2, sw/2 + padding, sh/2 + padding, 0, 0, Math.PI * 2);
+                    bgCtx.clip();
+                    bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+                    bgCtx.restore();
+                }
+            } else {
+                // Normal mode
+                bgCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+            }
 
             // Calculate and show signing area (opposite 75% of canvas)
             const signingPadding = 20;
@@ -752,6 +821,8 @@
             const img = new Image();
             img.onload = async () => {
                 backgroundImage = img;
+                backgroundImageOriginal = img;  // Save original for reprocessing
+                backgroundImageRemoved = null;  // Reset cached removed version
 
                 // Detect subject
                 const statusEl = document.getElementById('modelStatus');
@@ -769,6 +840,11 @@
 
                 console.log('Detected subject:', detectedSubject);
                 drawBackgroundWithSubject();
+
+                // If remove mode is active, start background removal
+                if (bgMode === 'remove') {
+                    processBackgroundRemoval();
+                }
             };
             img.src = URL.createObjectURL(file);
         }
@@ -801,13 +877,128 @@
 
         document.getElementById('clearBgBtn').addEventListener('click', () => {
             backgroundImage = null;
+            backgroundImageOriginal = null;
+            backgroundImageRemoved = null;
             detectedSubject = null;
             autoPositionSubject = true;  // Reset to auto
+            bgMode = 'normal';
+            updateBgModeButtons();
             hideSigningArea();
             drawBackground();
             document.getElementById('modelStatus').textContent = 'AI Ready';
             document.getElementById('modelStatus').className = 'model-status ready';
+            document.getElementById('bgEffectStatus').textContent = '';
         });
+
+        // Background mode buttons
+        function updateBgModeButtons() {
+            ['Normal', 'Blur', 'Fade', 'Remove'].forEach(mode => {
+                const btn = document.getElementById('bgMode' + mode);
+                if (mode.toLowerCase() === bgMode) {
+                    btn.style.background = '#d4a44a';
+                    btn.style.color = '#1a1a2e';
+                } else {
+                    btn.style.background = '#444';
+                    btn.style.color = '#fff';
+                }
+            });
+        }
+
+        async function processBackgroundRemoval() {
+            if (!backgroundImageOriginal || isProcessingBg) return;
+            if (backgroundImageRemoved) {
+                // Already processed
+                drawBackgroundWithSubject();
+                return;
+            }
+
+            isProcessingBg = true;
+            const statusEl = document.getElementById('bgEffectStatus');
+            statusEl.textContent = 'Removing background...';
+            statusEl.className = 'model-status loading';
+
+            try {
+                // Wait for the library to be available
+                if (!window.imglyRemoveBackground) {
+                    // Try waiting a bit for the module to load
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                if (!window.imglyRemoveBackground) {
+                    throw new Error('Background removal library not loaded');
+                }
+
+                // Convert image to blob
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = backgroundImageOriginal.width;
+                tempCanvas.height = backgroundImageOriginal.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(backgroundImageOriginal, 0, 0);
+
+                const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
+
+                // Process with background removal
+                const resultBlob = await window.imglyRemoveBackground(blob, {
+                    progress: (key, current, total) => {
+                        const percent = Math.round((current / total) * 100);
+                        statusEl.textContent = `Processing: ${percent}%`;
+                    }
+                });
+
+                // Convert result to image
+                const resultUrl = URL.createObjectURL(resultBlob);
+                backgroundImageRemoved = new Image();
+                backgroundImageRemoved.onload = () => {
+                    statusEl.textContent = 'Background removed';
+                    statusEl.className = 'model-status ready';
+                    isProcessingBg = false;
+                    drawBackgroundWithSubject();
+                };
+                backgroundImageRemoved.src = resultUrl;
+
+            } catch (err) {
+                console.error('Background removal failed:', err);
+                statusEl.textContent = 'Removal failed';
+                statusEl.className = 'model-status';
+                isProcessingBg = false;
+                // Fall back to normal mode
+                bgMode = 'normal';
+                updateBgModeButtons();
+                drawBackgroundWithSubject();
+            }
+        }
+
+        document.getElementById('bgModeNormal').addEventListener('click', () => {
+            bgMode = 'normal';
+            updateBgModeButtons();
+            document.getElementById('bgEffectStatus').textContent = '';
+            if (backgroundImage) drawBackgroundWithSubject();
+        });
+
+        document.getElementById('bgModeBlur').addEventListener('click', () => {
+            bgMode = 'blur';
+            updateBgModeButtons();
+            document.getElementById('bgEffectStatus').textContent = '';
+            if (backgroundImage) drawBackgroundWithSubject();
+        });
+
+        document.getElementById('bgModeFade').addEventListener('click', () => {
+            bgMode = 'fade';
+            updateBgModeButtons();
+            document.getElementById('bgEffectStatus').textContent = '';
+            if (backgroundImage) drawBackgroundWithSubject();
+        });
+
+        document.getElementById('bgModeRemove').addEventListener('click', () => {
+            bgMode = 'remove';
+            updateBgModeButtons();
+            if (backgroundImage) {
+                processBackgroundRemoval();
+            }
+        });
+
+        // Initialize bg mode buttons
+        updateBgModeButtons();
 
         // =====================================================================
         // DRAWING STATE
