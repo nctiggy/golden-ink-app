@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v1.4</span>
+        <span style="font-size: 10px; color: #666;">v1.5</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -963,44 +963,31 @@
                 maskCanvas.height = backgroundImageOriginal.height;
                 const maskCtx = maskCanvas.getContext('2d');
 
-                // Draw the segmentation mask
+                // Draw the segmentation mask with blur to smooth blocky edges
+                maskCtx.filter = 'blur(3px)';
                 maskCtx.drawImage(
                     segmentationResult.segmentationMask,
                     0, 0,
                     backgroundImageOriginal.width,
                     backgroundImageOriginal.height
                 );
+                maskCtx.filter = 'none';
 
-                // Apply soft threshold: remove low-confidence artifacts but preserve smooth edges
+                // Apply threshold to clean up artifacts while preserving smooth edges
                 const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
                 const maskData = maskImageData.data;
-                const cutoffThreshold = 50;   // Below this = definitely background (artifacts)
-                const boostThreshold = 200;   // Above this = definitely subject
+                const cutoffThreshold = 30;   // Low cutoff to remove artifacts (blurred edges are softer)
 
                 for (let i = 0; i < maskData.length; i += 4) {
                     const value = maskData[i];
                     if (value < cutoffThreshold) {
-                        // Very low confidence - remove completely (artifacts like the orange G)
+                        // Very low confidence - remove completely
                         maskData[i] = 0;
                         maskData[i + 1] = 0;
                         maskData[i + 2] = 0;
                         maskData[i + 3] = 0;
-                    } else if (value > boostThreshold) {
-                        // High confidence - keep fully opaque
-                        maskData[i] = 255;
-                        maskData[i + 1] = 255;
-                        maskData[i + 2] = 255;
-                        maskData[i + 3] = 255;
-                    } else {
-                        // Mid-range - scale the value to create smooth transition
-                        // Map [cutoffThreshold, boostThreshold] to [0, 255]
-                        const range = boostThreshold - cutoffThreshold;
-                        const scaled = Math.round(((value - cutoffThreshold) / range) * 255);
-                        maskData[i] = scaled;
-                        maskData[i + 1] = scaled;
-                        maskData[i + 2] = scaled;
-                        maskData[i + 3] = scaled;
                     }
+                    // Keep everything else as-is (blur already smoothed edges)
                 }
                 maskCtx.putImageData(maskImageData, 0, 0);
 
