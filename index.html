@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v1.7</span>
+        <span style="font-size: 10px; color: #666;">v1.8</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -994,17 +994,30 @@
                 }
                 maskCtx.putImageData(maskImageData, 0, 0);
 
-                // Now apply blur AFTER threshold to smooth the hard edges
+                // Apply stronger blur AFTER threshold to smooth hard edges
                 const smoothCanvas = document.createElement('canvas');
                 smoothCanvas.width = maskCanvas.width;
                 smoothCanvas.height = maskCanvas.height;
                 const smoothCtx = smoothCanvas.getContext('2d');
-                smoothCtx.filter = 'blur(2px)';
+                smoothCtx.filter = 'blur(6px)';
                 smoothCtx.drawImage(maskCanvas, 0, 0);
+                smoothCtx.filter = 'none';
 
-                // Copy back to mask canvas
+                // Second threshold pass to tighten after blur (blur expands edges)
+                const smoothData = smoothCtx.getImageData(0, 0, smoothCanvas.width, smoothCanvas.height);
+                const sData = smoothData.data;
+                for (let i = 0; i < sData.length; i += 4) {
+                    if (sData[i] < 128) {
+                        sData[i] = sData[i + 1] = sData[i + 2] = sData[i + 3] = 0;
+                    }
+                }
+                smoothCtx.putImageData(smoothData, 0, 0);
+
+                // Final light blur for smooth edge transition
                 maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                maskCtx.filter = 'blur(1px)';
                 maskCtx.drawImage(smoothCanvas, 0, 0);
+                maskCtx.filter = 'none';
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
