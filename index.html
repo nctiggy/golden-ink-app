@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.5</span>
+        <span style="font-size: 10px; color: #666;">v2.6</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -273,6 +273,37 @@
         <button id="bgModeFade" class="secondary" style="padding: 8px 12px;">Fade</button>
         <button id="bgModeRemove" class="secondary" style="padding: 8px 12px;">Remove</button>
         <span class="model-status" id="bgEffectStatus"></span>
+    </div>
+
+    <!-- Background Removal Fine-tuning Controls -->
+    <div id="removalControls" class="bg-controls" style="margin-top: 8px; display: none; flex-wrap: wrap; gap: 12px;">
+        <label style="color: #888; font-size: 11px; display: flex; align-items: center; gap: 4px;">
+            Threshold: <input type="range" id="maskThreshold" min="50" max="250" value="180" style="width: 60px;">
+            <span id="thresholdValue" style="min-width: 24px;">180</span>
+        </label>
+        <label style="color: #888; font-size: 11px; display: flex; align-items: center; gap: 4px;">
+            Edge: <input type="range" id="maskExpand" min="-20" max="20" value="0" style="width: 60px;">
+            <span id="expandValue" style="min-width: 24px;">0</span>
+        </label>
+        <label style="color: #888; font-size: 11px; display: flex; align-items: center; gap: 4px;">
+            Feather: <input type="range" id="maskFeather" min="0" max="10" value="0" style="width: 60px;">
+            <span id="featherValue" style="min-width: 24px;">0</span>
+        </label>
+        <button id="reprocessBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Reprocess</button>
+        <button id="drawOutlineBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Draw Outline</button>
+        <button id="cleanupBrushBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Cleanup Brush</button>
+    </div>
+
+    <!-- Cleanup Brush Mode Controls -->
+    <div id="cleanupControls" class="bg-controls" style="margin-top: 8px; display: none; gap: 12px;">
+        <span style="color: #888; font-size: 11px;">Brush Mode:</span>
+        <button id="brushErase" class="secondary" style="padding: 6px 12px; font-size: 11px; background: #a33;">Erase</button>
+        <button id="brushRestore" class="secondary" style="padding: 6px 12px; font-size: 11px;">Restore</button>
+        <label style="color: #888; font-size: 11px; display: flex; align-items: center; gap: 4px;">
+            Size: <input type="range" id="brushSize" min="5" max="50" value="20" style="width: 60px;">
+            <span id="brushSizeValue" style="min-width: 24px;">20</span>
+        </label>
+        <button id="doneCleanupBtn" class="secondary" style="padding: 6px 12px; font-size: 11px;">Done</button>
     </div>
 
     <div class="controls">
@@ -898,7 +929,21 @@
                     btn.style.color = '#fff';
                 }
             });
+            // Show/hide removal controls
+            const removalControls = document.getElementById('removalControls');
+            if (removalControls) {
+                removalControls.style.display = bgMode === 'remove' ? 'flex' : 'none';
+            }
         }
+
+        // Mask processing settings
+        let maskThreshold = 180;
+        let maskExpand = 0;
+        let maskFeather = 0;
+        let userOutline = null;  // User-drawn outline for subject selection
+        let cleanupMode = null;  // 'erase' or 'restore'
+        let brushSize = 20;
+        let segmentationMaskCanvas = null;  // Store raw segmentation for reprocessing
 
         // MediaPipe Selfie Segmentation - fast, lightweight, designed for real-time
         let selfieSegmentation = null;
@@ -977,15 +1022,15 @@
                 const width = maskCanvas.width;
                 const height = maskCanvas.height;
 
-                // Use detected subject bounding box to filter mask
-                // This removes artifacts outside the person area (like the orange G cone)
-                if (detectedSubject) {
+                // Use user outline if available, otherwise use detected subject
+                const subjectBox = userOutline || detectedSubject;
+                if (subjectBox) {
                     // Expand bounding box by 20% to include edges
                     const padding = 0.2;
-                    const boxX = Math.max(0, detectedSubject.x - detectedSubject.width * padding);
-                    const boxY = Math.max(0, detectedSubject.y - detectedSubject.height * padding);
-                    const boxW = Math.min(width - boxX, detectedSubject.width * (1 + padding * 2));
-                    const boxH = Math.min(height - boxY, detectedSubject.height * (1 + padding * 2));
+                    const boxX = Math.max(0, subjectBox.x - subjectBox.width * padding);
+                    const boxY = Math.max(0, subjectBox.y - subjectBox.height * padding);
+                    const boxW = Math.min(width - boxX, subjectBox.width * (1 + padding * 2));
+                    const boxH = Math.min(height - boxY, subjectBox.height * (1 + padding * 2));
                     const boxRight = boxX + boxW;
                     const boxBottom = boxY + boxH;
 
@@ -1003,10 +1048,9 @@
                     }
                 }
 
-                // Apply threshold to remove faint/semi-transparent areas (white strip, etc)
-                const threshold = 180;
+                // Apply threshold to remove faint/semi-transparent areas
                 for (let i = 0; i < maskData.length; i += 4) {
-                    if (maskData[i] < threshold) {
+                    if (maskData[i] < maskThreshold) {
                         maskData[i] = 0;
                         maskData[i + 1] = 0;
                         maskData[i + 2] = 0;
@@ -1014,6 +1058,57 @@
                     }
                 }
                 maskCtx.putImageData(maskImageData, 0, 0);
+
+                // Apply edge expansion/contraction if set
+                if (maskExpand !== 0) {
+                    const expandData = maskCtx.getImageData(0, 0, width, height);
+                    const srcData = new Uint8ClampedArray(expandData.data);
+                    const radius = Math.abs(maskExpand);
+                    const expanding = maskExpand > 0;
+
+                    for (let y = 0; y < height; y++) {
+                        for (let x = 0; x < width; x++) {
+                            const idx = (y * width + x) * 4;
+                            let hasNeighbor = false;
+
+                            // Check neighbors within radius
+                            for (let dy = -radius; dy <= radius && !hasNeighbor; dy++) {
+                                for (let dx = -radius; dx <= radius && !hasNeighbor; dx++) {
+                                    const ny = y + dy, nx = x + dx;
+                                    if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                                        const nidx = (ny * width + nx) * 4;
+                                        if (srcData[nidx] > 128) hasNeighbor = true;
+                                    }
+                                }
+                            }
+
+                            if (expanding) {
+                                // Expand: if any neighbor is white, make this white
+                                if (hasNeighbor) {
+                                    expandData.data[idx] = expandData.data[idx + 1] = expandData.data[idx + 2] = expandData.data[idx + 3] = 255;
+                                }
+                            } else {
+                                // Contract: if current is white but on edge (not all neighbors white), make transparent
+                                if (srcData[idx] > 128 && !hasNeighbor) {
+                                    expandData.data[idx] = expandData.data[idx + 1] = expandData.data[idx + 2] = expandData.data[idx + 3] = 0;
+                                }
+                            }
+                        }
+                    }
+                    maskCtx.putImageData(expandData, 0, 0);
+                }
+
+                // Apply feathering (blur) if set
+                if (maskFeather > 0) {
+                    const featherCanvas = document.createElement('canvas');
+                    featherCanvas.width = width;
+                    featherCanvas.height = height;
+                    const featherCtx = featherCanvas.getContext('2d');
+                    featherCtx.filter = `blur(${maskFeather}px)`;
+                    featherCtx.drawImage(maskCanvas, 0, 0);
+                    maskCtx.clearRect(0, 0, width, height);
+                    maskCtx.drawImage(featherCanvas, 0, 0);
+                }
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
@@ -1083,6 +1178,110 @@
 
         // Initialize bg mode buttons
         updateBgModeButtons();
+
+        // =====================================================================
+        // BACKGROUND REMOVAL CONTROLS
+        // =====================================================================
+
+        // Threshold slider
+        document.getElementById('maskThreshold').addEventListener('input', (e) => {
+            maskThreshold = parseInt(e.target.value);
+            document.getElementById('thresholdValue').textContent = maskThreshold;
+        });
+
+        // Edge expand/contract slider
+        document.getElementById('maskExpand').addEventListener('input', (e) => {
+            maskExpand = parseInt(e.target.value);
+            document.getElementById('expandValue').textContent = maskExpand;
+        });
+
+        // Feather slider
+        document.getElementById('maskFeather').addEventListener('input', (e) => {
+            maskFeather = parseInt(e.target.value);
+            document.getElementById('featherValue').textContent = maskFeather;
+        });
+
+        // Reprocess button
+        document.getElementById('reprocessBtn').addEventListener('click', () => {
+            backgroundImageRemoved = null;  // Clear cached result
+            processBackgroundRemoval();
+        });
+
+        // Draw outline button
+        let drawingOutline = false;
+        let outlinePoints = [];
+
+        document.getElementById('drawOutlineBtn').addEventListener('click', () => {
+            drawingOutline = !drawingOutline;
+            const btn = document.getElementById('drawOutlineBtn');
+            if (drawingOutline) {
+                btn.style.background = '#d4a44a';
+                btn.style.color = '#1a1a2e';
+                btn.textContent = 'Finish Outline';
+                outlinePoints = [];
+                alert('Draw a rough outline around the subject you want to keep. Click "Finish Outline" when done.');
+            } else {
+                btn.style.background = '#444';
+                btn.style.color = '#fff';
+                btn.textContent = 'Draw Outline';
+                if (outlinePoints.length > 2) {
+                    // Create bounding box from outline
+                    const xs = outlinePoints.map(p => p.x);
+                    const ys = outlinePoints.map(p => p.y);
+                    userOutline = {
+                        x: Math.min(...xs),
+                        y: Math.min(...ys),
+                        width: Math.max(...xs) - Math.min(...xs),
+                        height: Math.max(...ys) - Math.min(...ys)
+                    };
+                    // Reprocess with user outline
+                    backgroundImageRemoved = null;
+                    processBackgroundRemoval();
+                }
+            }
+        });
+
+        // Cleanup brush button
+        document.getElementById('cleanupBrushBtn').addEventListener('click', () => {
+            document.getElementById('cleanupControls').style.display = 'flex';
+            cleanupMode = 'erase';
+            updateCleanupButtons();
+        });
+
+        // Cleanup mode buttons
+        document.getElementById('brushErase').addEventListener('click', () => {
+            cleanupMode = 'erase';
+            updateCleanupButtons();
+        });
+
+        document.getElementById('brushRestore').addEventListener('click', () => {
+            cleanupMode = 'restore';
+            updateCleanupButtons();
+        });
+
+        function updateCleanupButtons() {
+            const eraseBtn = document.getElementById('brushErase');
+            const restoreBtn = document.getElementById('brushRestore');
+            if (cleanupMode === 'erase') {
+                eraseBtn.style.background = '#a33';
+                restoreBtn.style.background = '#444';
+            } else {
+                eraseBtn.style.background = '#444';
+                restoreBtn.style.background = '#3a3';
+            }
+        }
+
+        // Brush size slider
+        document.getElementById('brushSize').addEventListener('input', (e) => {
+            brushSize = parseInt(e.target.value);
+            document.getElementById('brushSizeValue').textContent = brushSize;
+        });
+
+        // Done cleanup button
+        document.getElementById('doneCleanupBtn').addEventListener('click', () => {
+            document.getElementById('cleanupControls').style.display = 'none';
+            cleanupMode = null;
+        });
 
         // =====================================================================
         // DRAWING STATE
