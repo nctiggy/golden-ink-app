@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.9</span>
+        <span style="font-size: 10px; color: #666;">v3.0</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -1278,10 +1278,15 @@
                 btn.style.background = '#444';
                 btn.style.color = '#fff';
                 btn.textContent = 'Draw Outline';
-                if (outlinePoints.length > 2) {
-                    // Create bounding box from outline
-                    const xs = outlinePoints.map(p => p.x);
-                    const ys = outlinePoints.map(p => p.y);
+                if (outlinePoints.length > 2 && backgroundImageOriginal) {
+                    // Convert screen coordinates to image coordinates
+                    const rect = effectCanvas.getBoundingClientRect();
+                    const scaleX = backgroundImageOriginal.width / rect.width;
+                    const scaleY = backgroundImageOriginal.height / rect.height;
+
+                    // Create bounding box from outline in image coordinates
+                    const xs = outlinePoints.map(p => p.x * scaleX);
+                    const ys = outlinePoints.map(p => p.y * scaleY);
                     userOutline = {
                         x: Math.min(...xs),
                         y: Math.min(...ys),
@@ -1290,6 +1295,9 @@
                     };
                     // Show clear button since we have an outline
                     clearBtn.style.display = 'inline-block';
+                    // Clear the yellow outline from effect canvas
+                    const effectCtx = effectCanvas.getContext('2d');
+                    effectCtx.clearRect(0, 0, effectCanvas.width, effectCanvas.height);
                     // Reprocess with user outline
                     backgroundImageRemoved = null;
                     processBackgroundRemoval();
