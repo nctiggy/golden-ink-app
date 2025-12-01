@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v1.6</span>
+        <span style="font-size: 10px; color: #666;">v1.7</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -963,33 +963,48 @@
                 maskCanvas.height = backgroundImageOriginal.height;
                 const maskCtx = maskCanvas.getContext('2d');
 
-                // Draw the segmentation mask with blur to smooth blocky edges
-                maskCtx.filter = 'blur(3px)';
+                // Draw the segmentation mask
                 maskCtx.drawImage(
                     segmentationResult.segmentationMask,
                     0, 0,
                     backgroundImageOriginal.width,
                     backgroundImageOriginal.height
                 );
-                maskCtx.filter = 'none';
 
-                // Apply threshold to clean up artifacts while preserving smooth edges
+                // Apply tight threshold to remove background, then blur for smooth edges
                 const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
                 const maskData = maskImageData.data;
-                const cutoffThreshold = 100;  // Higher threshold to tighten mask and remove background bleed
+                const cutoffThreshold = 180;  // Aggressive threshold - only keep high confidence areas
 
                 for (let i = 0; i < maskData.length; i += 4) {
                     const value = maskData[i];
                     if (value < cutoffThreshold) {
-                        // Very low confidence - remove completely
+                        // Below threshold - make transparent
                         maskData[i] = 0;
                         maskData[i + 1] = 0;
                         maskData[i + 2] = 0;
                         maskData[i + 3] = 0;
+                    } else {
+                        // Above threshold - make fully opaque
+                        maskData[i] = 255;
+                        maskData[i + 1] = 255;
+                        maskData[i + 2] = 255;
+                        maskData[i + 3] = 255;
                     }
-                    // Keep everything else as-is (blur already smoothed edges)
                 }
                 maskCtx.putImageData(maskImageData, 0, 0);
+
+                // Now apply blur AFTER threshold to smooth the hard edges
+                const smoothCanvas = document.createElement('canvas');
+                smoothCanvas.width = maskCanvas.width;
+                smoothCanvas.height = maskCanvas.height;
+                const smoothCtx = smoothCanvas.getContext('2d');
+                smoothCtx.filter = 'blur(2px)';
+                smoothCtx.drawImage(maskCanvas, 0, 0);
+
+                // Copy back to mask canvas
+                maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                maskCtx.drawImage(smoothCanvas, 0, 0);
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
