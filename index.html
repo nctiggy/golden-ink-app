@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.1</span>
+        <span style="font-size: 10px; color: #666;">v2.2</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -970,6 +970,72 @@
                     backgroundImageOriginal.width,
                     backgroundImageOriginal.height
                 );
+
+                // Get mask data and keep only the largest connected region
+                // This removes small isolated artifacts like the orange G cone
+                const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+                const maskData = maskImageData.data;
+                const width = maskCanvas.width;
+                const height = maskCanvas.height;
+
+                // Convert to binary mask (threshold at 128)
+                const binary = new Uint8Array(width * height);
+                for (let i = 0; i < binary.length; i++) {
+                    binary[i] = maskData[i * 4] > 128 ? 1 : 0;
+                }
+
+                // Find connected components using flood fill
+                const labels = new Int32Array(width * height);
+                let currentLabel = 0;
+                const componentSizes = [0]; // index 0 unused
+
+                function floodFill(startX, startY, label) {
+                    const stack = [[startX, startY]];
+                    let size = 0;
+                    while (stack.length > 0) {
+                        const [x, y] = stack.pop();
+                        const idx = y * width + x;
+                        if (x < 0 || x >= width || y < 0 || y >= height) continue;
+                        if (binary[idx] === 0 || labels[idx] !== 0) continue;
+                        labels[idx] = label;
+                        size++;
+                        stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+                    }
+                    return size;
+                }
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = y * width + x;
+                        if (binary[idx] === 1 && labels[idx] === 0) {
+                            currentLabel++;
+                            const size = floodFill(x, y, currentLabel);
+                            componentSizes.push(size);
+                        }
+                    }
+                }
+
+                // Find the largest component
+                let largestLabel = 1;
+                let largestSize = 0;
+                for (let i = 1; i < componentSizes.length; i++) {
+                    if (componentSizes[i] > largestSize) {
+                        largestSize = componentSizes[i];
+                        largestLabel = i;
+                    }
+                }
+
+                // Update mask to keep only the largest component
+                for (let i = 0; i < labels.length; i++) {
+                    if (labels[i] !== largestLabel) {
+                        // Not the largest component - make transparent
+                        maskData[i * 4] = 0;
+                        maskData[i * 4 + 1] = 0;
+                        maskData[i * 4 + 2] = 0;
+                        maskData[i * 4 + 3] = 0;
+                    }
+                }
+                maskCtx.putImageData(maskImageData, 0, 0);
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
