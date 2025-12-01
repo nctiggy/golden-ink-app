@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.3</span>
+        <span style="font-size: 10px; color: #666;">v2.4</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -971,100 +971,37 @@
                     backgroundImageOriginal.height
                 );
 
-                // Get mask data and keep only the largest connected region
-                // This removes small isolated artifacts like the orange G cone
-                const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-                const maskData = maskImageData.data;
-                const width = maskCanvas.width;
-                const height = maskCanvas.height;
+                // Use detected subject bounding box to filter mask
+                // This removes artifacts outside the person area (like the orange G cone)
+                if (detectedSubject) {
+                    const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+                    const maskData = maskImageData.data;
+                    const width = maskCanvas.width;
+                    const height = maskCanvas.height;
 
-                // Convert to binary mask (high threshold to break weak connections)
-                const binary = new Uint8Array(width * height);
-                for (let i = 0; i < binary.length; i++) {
-                    binary[i] = maskData[i * 4] > 200 ? 1 : 0;
-                }
+                    // Expand bounding box by 20% to include edges
+                    const padding = 0.2;
+                    const boxX = Math.max(0, detectedSubject.x - detectedSubject.width * padding);
+                    const boxY = Math.max(0, detectedSubject.y - detectedSubject.height * padding);
+                    const boxW = Math.min(width - boxX, detectedSubject.width * (1 + padding * 2));
+                    const boxH = Math.min(height - boxY, detectedSubject.height * (1 + padding * 2));
+                    const boxRight = boxX + boxW;
+                    const boxBottom = boxY + boxH;
 
-                // Find connected components using flood fill
-                const labels = new Int32Array(width * height);
-                let currentLabel = 0;
-                const componentSizes = [0]; // index 0 unused
-
-                function floodFill(startX, startY, label) {
-                    const stack = [[startX, startY]];
-                    let size = 0;
-                    while (stack.length > 0) {
-                        const [x, y] = stack.pop();
-                        const idx = y * width + x;
-                        if (x < 0 || x >= width || y < 0 || y >= height) continue;
-                        if (binary[idx] === 0 || labels[idx] !== 0) continue;
-                        labels[idx] = label;
-                        size++;
-                        stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-                    }
-                    return size;
-                }
-
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        const idx = y * width + x;
-                        if (binary[idx] === 1 && labels[idx] === 0) {
-                            currentLabel++;
-                            const size = floodFill(x, y, currentLabel);
-                            componentSizes.push(size);
-                        }
-                    }
-                }
-
-                // Find the largest component
-                let largestLabel = 1;
-                let largestSize = 0;
-                for (let i = 1; i < componentSizes.length; i++) {
-                    if (componentSizes[i] > largestSize) {
-                        largestSize = componentSizes[i];
-                        largestLabel = i;
-                    }
-                }
-
-                // Create a mask of pixels belonging to largest component
-                const inLargest = new Uint8Array(width * height);
-                for (let i = 0; i < labels.length; i++) {
-                    inLargest[i] = labels[i] === largestLabel ? 1 : 0;
-                }
-
-                // Dilate the largest component mask to include edge pixels
-                const dilated = new Uint8Array(width * height);
-                const dilateRadius = 5;
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        const idx = y * width + x;
-                        if (inLargest[idx]) {
-                            dilated[idx] = 1;
-                        } else {
-                            // Check if near the largest component
-                            let near = false;
-                            for (let dy = -dilateRadius; dy <= dilateRadius && !near; dy++) {
-                                for (let dx = -dilateRadius; dx <= dilateRadius && !near; dx++) {
-                                    const ny = y + dy, nx = x + dx;
-                                    if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-                                        if (inLargest[ny * width + nx]) near = true;
-                                    }
-                                }
+                    // Remove mask pixels outside the bounding box
+                    for (let y = 0; y < height; y++) {
+                        for (let x = 0; x < width; x++) {
+                            if (x < boxX || x > boxRight || y < boxY || y > boxBottom) {
+                                const idx = (y * width + x) * 4;
+                                maskData[idx] = 0;
+                                maskData[idx + 1] = 0;
+                                maskData[idx + 2] = 0;
+                                maskData[idx + 3] = 0;
                             }
-                            dilated[idx] = near ? 1 : 0;
                         }
                     }
+                    maskCtx.putImageData(maskImageData, 0, 0);
                 }
-
-                // Update mask: keep only pixels in dilated region of largest component
-                for (let i = 0; i < labels.length; i++) {
-                    if (!dilated[i]) {
-                        maskData[i * 4] = 0;
-                        maskData[i * 4 + 1] = 0;
-                        maskData[i * 4 + 2] = 0;
-                        maskData[i * 4 + 3] = 0;
-                    }
-                }
-                maskCtx.putImageData(maskImageData, 0, 0);
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
