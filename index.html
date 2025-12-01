@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v1.5</span>
+        <span style="font-size: 10px; color: #666;">v1.6</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -976,7 +976,7 @@
                 // Apply threshold to clean up artifacts while preserving smooth edges
                 const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
                 const maskData = maskImageData.data;
-                const cutoffThreshold = 30;   // Low cutoff to remove artifacts (blurred edges are softer)
+                const cutoffThreshold = 100;  // Higher threshold to tighten mask and remove background bleed
 
                 for (let i = 0; i < maskData.length; i += 4) {
                     const value = maskData[i];
