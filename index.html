@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.6</span>
+        <span style="font-size: 10px; color: #666;">v2.7</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -944,6 +944,7 @@
         let cleanupMode = null;  // 'erase' or 'restore'
         let brushSize = 20;
         let segmentationMaskCanvas = null;  // Store raw segmentation for reprocessing
+        let isCleaningUp = false;  // Currently painting with cleanup brush
 
         // MediaPipe Selfie Segmentation - fast, lightweight, designed for real-time
         let selfieSegmentation = null;
@@ -973,6 +974,54 @@
             });
 
             return selfieSegmentation;
+        }
+
+        // Cleanup brush for manual mask editing
+        function applyCleanupBrush(e) {
+            if (!backgroundImageRemoved) return;
+
+            const rect = drawCanvas.getBoundingClientRect();
+            const scaleX = backgroundImageOriginal.width / rect.width;
+            const scaleY = backgroundImageOriginal.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            // Create a temp canvas to modify the removed background image
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = backgroundImageOriginal.width;
+            tempCanvas.height = backgroundImageOriginal.height;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            // Draw current removed background
+            tempCtx.drawImage(backgroundImageRemoved, 0, 0);
+
+            if (cleanupMode === 'erase') {
+                // Erase: make pixels transparent
+                tempCtx.globalCompositeOperation = 'destination-out';
+                tempCtx.beginPath();
+                tempCtx.arc(x, y, brushSize * scaleX, 0, Math.PI * 2);
+                tempCtx.fill();
+            } else if (cleanupMode === 'restore') {
+                // Restore: bring back pixels from original
+                tempCtx.globalCompositeOperation = 'source-over';
+                // First clip to circle
+                tempCtx.save();
+                tempCtx.beginPath();
+                tempCtx.arc(x, y, brushSize * scaleX, 0, Math.PI * 2);
+                tempCtx.clip();
+                // Draw original image in clipped area
+                tempCtx.drawImage(backgroundImageOriginal, 0, 0);
+                tempCtx.restore();
+            }
+
+            // Update the removed background image
+            const resultUrl = tempCanvas.toDataURL('image/png');
+            const newImg = new Image();
+            newImg.onload = () => {
+                backgroundImageRemoved = newImg;
+                drawBackgroundWithSubject();
+            };
+            newImg.src = resultUrl;
         }
 
         async function processBackgroundRemoval() {
@@ -1466,6 +1515,40 @@
             }
 
             e.preventDefault();
+
+            // Handle outline drawing mode
+            if (drawingOutline) {
+                const rect = drawCanvas.getBoundingClientRect();
+                const scaleX = drawCanvas.width / rect.width;
+                const scaleY = drawCanvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                outlinePoints.push({x, y});
+
+                // Draw visual feedback on effect canvas
+                const effectCtx = effectCanvas.getContext('2d');
+                effectCtx.strokeStyle = '#ff0';
+                effectCtx.lineWidth = 3;
+                if (outlinePoints.length === 1) {
+                    effectCtx.beginPath();
+                    effectCtx.arc(x, y, 5, 0, Math.PI * 2);
+                    effectCtx.stroke();
+                } else {
+                    effectCtx.beginPath();
+                    effectCtx.moveTo(outlinePoints[outlinePoints.length - 2].x, outlinePoints[outlinePoints.length - 2].y);
+                    effectCtx.lineTo(x, y);
+                    effectCtx.stroke();
+                }
+                return;
+            }
+
+            // Handle cleanup brush mode
+            if (cleanupMode && backgroundImageRemoved) {
+                isCleaningUp = true;
+                applyCleanupBrush(e);
+                return;
+            }
+
             isDrawing = true;
 
             const data = getPointerData(e);
@@ -1505,6 +1588,33 @@
         }
 
         function continueStroke(e) {
+            // Handle outline drawing mode
+            if (drawingOutline) {
+                const rect = drawCanvas.getBoundingClientRect();
+                const scaleX = drawCanvas.width / rect.width;
+                const scaleY = drawCanvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+
+                if (outlinePoints.length > 0) {
+                    outlinePoints.push({x, y});
+                    const effectCtx = effectCanvas.getContext('2d');
+                    effectCtx.strokeStyle = '#ff0';
+                    effectCtx.lineWidth = 3;
+                    effectCtx.beginPath();
+                    effectCtx.moveTo(outlinePoints[outlinePoints.length - 2].x, outlinePoints[outlinePoints.length - 2].y);
+                    effectCtx.lineTo(x, y);
+                    effectCtx.stroke();
+                }
+                return;
+            }
+
+            // Handle cleanup brush mode
+            if (isCleaningUp && cleanupMode) {
+                applyCleanupBrush(e);
+                return;
+            }
+
             if (!isDrawing) return;
 
             if (config.palmRejection && e.pointerType === 'touch' && isPenDetected) {
@@ -1568,6 +1678,12 @@
         }
 
         function endStroke(e) {
+            // End cleanup brush mode
+            if (isCleaningUp) {
+                isCleaningUp = false;
+                return;
+            }
+
             if (!isDrawing) return;
             isDrawing = false;
 
