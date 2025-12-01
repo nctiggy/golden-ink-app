@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.5</span>
+        <span style="font-size: 10px; color: #666;">v2.7</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -446,11 +446,25 @@
         }
 
         setupCanvas();
+
+        // Track last dimensions to avoid unnecessary resets on scroll
+        let lastWindowWidth = window.innerWidth;
+        let lastWindowHeight = window.innerHeight;
+
         window.addEventListener('resize', () => {
+            // Only reset if dimensions actually changed (not just scroll on mobile)
+            if (window.innerWidth === lastWindowWidth && window.innerHeight === lastWindowHeight) {
+                return;
+            }
+            lastWindowWidth = window.innerWidth;
+            lastWindowHeight = window.innerHeight;
+
             setupCanvas();
             if (backgroundImage) {
                 drawBackgroundWithSubject();
             }
+            // Redraw strokes after resize
+            redrawAllStrokes();
         });
 
         // =====================================================================
@@ -1014,6 +1028,39 @@
                     }
                 }
                 maskCtx.putImageData(maskImageData, 0, 0);
+
+                // Apply edge contraction (-3 pixels) to tighten the mask edges
+                const edgeContract = 3;
+                const contractData = maskCtx.getImageData(0, 0, width, height);
+                const srcData = new Uint8ClampedArray(contractData.data);
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = (y * width + x) * 4;
+                        const currentVal = srcData[idx];
+
+                        // Contract: if any neighbor within radius is black, make this black
+                        if (currentVal > 0) {
+                            let hasBlackNeighbor = false;
+                            for (let dy = -edgeContract; dy <= edgeContract && !hasBlackNeighbor; dy++) {
+                                for (let dx = -edgeContract; dx <= edgeContract && !hasBlackNeighbor; dx++) {
+                                    const ny = y + dy, nx = x + dx;
+                                    if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                                        const nidx = (ny * width + nx) * 4;
+                                        if (srcData[nidx] === 0) hasBlackNeighbor = true;
+                                    }
+                                }
+                            }
+                            if (hasBlackNeighbor) {
+                                contractData.data[idx] = 0;
+                                contractData.data[idx + 1] = 0;
+                                contractData.data[idx + 2] = 0;
+                                contractData.data[idx + 3] = 0;
+                            }
+                        }
+                    }
+                }
+                maskCtx.putImageData(contractData, 0, 0);
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
@@ -1764,7 +1811,22 @@
 
         // Initialize pattern canvas
         setupPatternCanvas();
-        window.addEventListener('resize', setupPatternCanvas);
+
+        // Track pattern canvas dimensions to avoid resetting on scroll
+        let lastPatternWidth = patternWidth;
+        let lastPatternHeight = patternHeight;
+
+        window.addEventListener('resize', () => {
+            // Only reset pattern if main canvas dimensions changed
+            const newWidth = canvasWidth || 800;
+            const newHeight = canvasHeight || 480;
+            if (newWidth === lastPatternWidth && newHeight === lastPatternHeight) {
+                return;
+            }
+            lastPatternWidth = newWidth;
+            lastPatternHeight = newHeight;
+            setupPatternCanvas();
+        });
 
         // =====================================================================
         // UPDATE METALLIC MASK TO USE PATTERN CANVAS
