@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.4</span>
+        <span style="font-size: 10px; color: #666;">v2.5</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -971,14 +971,15 @@
                     backgroundImageOriginal.height
                 );
 
+                // Clean up the mask
+                const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+                const maskData = maskImageData.data;
+                const width = maskCanvas.width;
+                const height = maskCanvas.height;
+
                 // Use detected subject bounding box to filter mask
                 // This removes artifacts outside the person area (like the orange G cone)
                 if (detectedSubject) {
-                    const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-                    const maskData = maskImageData.data;
-                    const width = maskCanvas.width;
-                    const height = maskCanvas.height;
-
                     // Expand bounding box by 20% to include edges
                     const padding = 0.2;
                     const boxX = Math.max(0, detectedSubject.x - detectedSubject.width * padding);
@@ -1000,8 +1001,19 @@
                             }
                         }
                     }
-                    maskCtx.putImageData(maskImageData, 0, 0);
                 }
+
+                // Apply threshold to remove faint/semi-transparent areas (white strip, etc)
+                const threshold = 180;
+                for (let i = 0; i < maskData.length; i += 4) {
+                    if (maskData[i] < threshold) {
+                        maskData[i] = 0;
+                        maskData[i + 1] = 0;
+                        maskData[i + 2] = 0;
+                        maskData[i + 3] = 0;
+                    }
+                }
+                maskCtx.putImageData(maskImageData, 0, 0);
 
                 // Create final image with transparent background
                 const finalCanvas = document.createElement('canvas');
