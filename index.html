@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v2.7</span>
+        <span style="font-size: 10px; color: #666;">v2.8</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -1510,13 +1510,45 @@
         function startStroke(e) {
             if (isPlayingRecording) return;  // Don't allow drawing during playback
 
+            // Block handwriting when in background removal modes
+            if (drawingOutline || cleanupMode) {
+                e.preventDefault();
+                if (drawingOutline) {
+                    // Handle outline drawing
+                    const rect = drawCanvas.getBoundingClientRect();
+                    const scaleX = drawCanvas.width / rect.width;
+                    const scaleY = drawCanvas.height / rect.height;
+                    const x = (e.clientX - rect.left) * scaleX;
+                    const y = (e.clientY - rect.top) * scaleY;
+                    outlinePoints.push({x, y});
+                    const effectCtx = effectCanvas.getContext('2d');
+                    effectCtx.strokeStyle = '#ff0';
+                    effectCtx.lineWidth = 3;
+                    if (outlinePoints.length === 1) {
+                        effectCtx.beginPath();
+                        effectCtx.arc(x, y, 5, 0, Math.PI * 2);
+                        effectCtx.stroke();
+                    } else {
+                        effectCtx.beginPath();
+                        effectCtx.moveTo(outlinePoints[outlinePoints.length - 2].x, outlinePoints[outlinePoints.length - 2].y);
+                        effectCtx.lineTo(x, y);
+                        effectCtx.stroke();
+                    }
+                } else if (cleanupMode && backgroundImageRemoved) {
+                    // Handle cleanup brush
+                    isCleaningUp = true;
+                    applyCleanupBrush(e);
+                }
+                return;  // Block all normal drawing
+            }
+
             if (config.palmRejection && e.pointerType === 'touch' && isPenDetected) {
                 return;
             }
 
             e.preventDefault();
 
-            // Handle outline drawing mode
+            // Handle outline drawing mode (legacy check - now handled above)
             if (drawingOutline) {
                 const rect = drawCanvas.getBoundingClientRect();
                 const scaleX = drawCanvas.width / rect.width;
@@ -1588,15 +1620,15 @@
         }
 
         function continueStroke(e) {
-            // Handle outline drawing mode
-            if (drawingOutline) {
-                const rect = drawCanvas.getBoundingClientRect();
-                const scaleX = drawCanvas.width / rect.width;
-                const scaleY = drawCanvas.height / rect.height;
-                const x = (e.clientX - rect.left) * scaleX;
-                const y = (e.clientY - rect.top) * scaleY;
-
-                if (outlinePoints.length > 0) {
+            // Block handwriting when in background removal modes
+            if (drawingOutline || cleanupMode) {
+                e.preventDefault();
+                if (drawingOutline && outlinePoints.length > 0) {
+                    const rect = drawCanvas.getBoundingClientRect();
+                    const scaleX = drawCanvas.width / rect.width;
+                    const scaleY = drawCanvas.height / rect.height;
+                    const x = (e.clientX - rect.left) * scaleX;
+                    const y = (e.clientY - rect.top) * scaleY;
                     outlinePoints.push({x, y});
                     const effectCtx = effectCanvas.getContext('2d');
                     effectCtx.strokeStyle = '#ff0';
@@ -1605,14 +1637,10 @@
                     effectCtx.moveTo(outlinePoints[outlinePoints.length - 2].x, outlinePoints[outlinePoints.length - 2].y);
                     effectCtx.lineTo(x, y);
                     effectCtx.stroke();
+                } else if (isCleaningUp && cleanupMode) {
+                    applyCleanupBrush(e);
                 }
-                return;
-            }
-
-            // Handle cleanup brush mode
-            if (isCleaningUp && cleanupMode) {
-                applyCleanupBrush(e);
-                return;
+                return;  // Block all normal drawing
             }
 
             if (!isDrawing) return;
@@ -1678,10 +1706,12 @@
         }
 
         function endStroke(e) {
-            // End cleanup brush mode
-            if (isCleaningUp) {
-                isCleaningUp = false;
-                return;
+            // Block handwriting when in background removal modes
+            if (drawingOutline || cleanupMode) {
+                if (isCleaningUp) {
+                    isCleaningUp = false;
+                }
+                return;  // Block all normal drawing
             }
 
             if (!isDrawing) return;
