@@ -7,11 +7,6 @@
     <!-- TensorFlow.js and COCO-SSD for subject detection -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
-    <!-- Background removal library -->
-    <script type="module">
-        import imglyRemoveBackground from 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm';
-        window.imglyRemoveBackground = imglyRemoveBackground;
-    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -904,6 +899,9 @@
             });
         }
 
+        // Cache for the dynamically imported module
+        let removeBackgroundFn = null;
+
         async function processBackgroundRemoval() {
             if (!backgroundImageOriginal || isProcessingBg) return;
             if (backgroundImageRemoved) {
@@ -914,19 +912,18 @@
 
             isProcessingBg = true;
             const statusEl = document.getElementById('bgEffectStatus');
-            statusEl.textContent = 'Removing background...';
+            statusEl.textContent = 'Loading AI model...';
             statusEl.className = 'model-status loading';
 
             try {
-                // Wait for the library to be available
-                if (!window.imglyRemoveBackground) {
-                    // Try waiting a bit for the module to load
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                // Dynamically import the background removal library
+                if (!removeBackgroundFn) {
+                    statusEl.textContent = 'Loading removal library...';
+                    const module = await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm');
+                    removeBackgroundFn = module.default;
                 }
 
-                if (!window.imglyRemoveBackground) {
-                    throw new Error('Background removal library not loaded');
-                }
+                statusEl.textContent = 'Processing image...';
 
                 // Convert image to blob
                 const tempCanvas = document.createElement('canvas');
@@ -938,10 +935,10 @@
                 const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
 
                 // Process with background removal
-                const resultBlob = await window.imglyRemoveBackground(blob, {
+                const resultBlob = await removeBackgroundFn(blob, {
                     progress: (key, current, total) => {
                         const percent = Math.round((current / total) * 100);
-                        statusEl.textContent = `Processing: ${percent}%`;
+                        statusEl.textContent = `Removing: ${percent}%`;
                     }
                 });
 
@@ -958,7 +955,7 @@
 
             } catch (err) {
                 console.error('Background removal failed:', err);
-                statusEl.textContent = 'Removal failed';
+                statusEl.textContent = 'Removal failed: ' + err.message;
                 statusEl.className = 'model-status';
                 isProcessingBg = false;
                 // Fall back to normal mode
