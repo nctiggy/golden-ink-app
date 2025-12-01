@@ -239,7 +239,7 @@
     <div class="header">
         <span>Golden Ink</span>
         <span class="pencil-status" id="pencilStatus">No Pencil</span>
-        <span style="font-size: 10px; color: #666;">v1.8</span>
+        <span style="font-size: 10px; color: #666;">v1.9</span>
     </div>
 
     <div class="canvas-container" id="container">
@@ -974,7 +974,7 @@
                 // Apply tight threshold to remove background, then blur for smooth edges
                 const maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
                 const maskData = maskImageData.data;
-                const cutoffThreshold = 180;  // Aggressive threshold - only keep high confidence areas
+                const cutoffThreshold = 230;  // Very aggressive - only keep highest confidence (90%+)
 
                 for (let i = 0; i < maskData.length; i += 4) {
                     const value = maskData[i];
